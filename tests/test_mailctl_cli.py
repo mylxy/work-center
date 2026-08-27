@@ -433,6 +433,57 @@ class MailctlCliTests(unittest.TestCase):
             self.assertEqual(result["category"], "capability")
             self.assertEqual(result["message"], "IMAP search rejected by server")
 
+    def test_search_retries_transient_imap_abort(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="mailctl-project-") as directory:
+            project = Path(directory)
+            initialized = run_mailctl(project, "init", "--email", "owner@example.com")
+            self.assertEqual(initialized.returncode, 0, initialized.stderr)
+            module = load_mailctl_module()
+            attempts = 0
+
+            class FlakyImap(SearchImapStub):
+                def uid(self, *query):
+                    nonlocal attempts
+                    attempts += 1
+                    if attempts < 3:
+                        raise module.imaplib.IMAP4.abort("socket error: EOF")
+                    return "OK", [b""]
+
+            exit_code, result = run_search_with_imap(
+                project,
+                module,
+                FlakyImap,
+                "--since",
+                "2026-08-26T00:00:00+08:00",
+            )
+
+            self.assertEqual(exit_code, 0, result)
+            self.assertEqual(result["items"], [])
+            self.assertEqual(attempts, 3)
+
+    def test_search_reports_server_denial_as_permission_error(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="mailctl-project-") as directory:
+            project = Path(directory)
+            initialized = run_mailctl(project, "init", "--email", "owner@example.com")
+            self.assertEqual(initialized.returncode, 0, initialized.stderr)
+            module = load_mailctl_module()
+
+            class DenyingImap(SearchImapStub):
+                def uid(self, *query):
+                    return "NO", [b"SEARCH not permitted"]
+
+            exit_code, result = run_search_with_imap(
+                project,
+                module,
+                DenyingImap,
+                "--since",
+                "2026-08-26T00:00:00+08:00",
+            )
+
+            self.assertEqual(exit_code, 2, result)
+            self.assertEqual(result["category"], "permission")
+            self.assertEqual(result["message"], "IMAP search denied by server")
+
     def test_search_retries_connection_failure_twice(self) -> None:
         with tempfile.TemporaryDirectory(prefix="mailctl-project-") as directory:
             project = Path(directory)

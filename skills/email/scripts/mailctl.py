@@ -303,8 +303,12 @@ class ImapMailbox:
             tokens.append("ALL")
         try:
             status, data = self.client.uid("SEARCH", None, *tokens)
+        except imaplib.IMAP4.abort as error:
+            raise MailctlError("connection", "IMAP search failed") from error
         except imaplib.IMAP4.error as error:
             raise MailctlError("capability", "IMAP search rejected by server") from error
+        if status == "NO":
+            raise MailctlError("permission", "IMAP search denied by server")
         if status != "OK":
             raise MailctlError("capability", "IMAP search rejected by server")
         return [int(value) for value in (data[0] or b"").split()]
