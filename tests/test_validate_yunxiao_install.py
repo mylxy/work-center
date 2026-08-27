@@ -14,12 +14,30 @@ from scripts.validate_yunxiao_install import (
 )
 
 
-def fake_codex(directory: Path, final: dict | None, event_tools=(), error="") -> Path:
+def fake_codex(
+    directory: Path,
+    final: dict | None,
+    event_tools=(),
+    error="",
+    event_errors=None,
+) -> Path:
     executable = directory / "codex"
     payload = json.dumps(final, ensure_ascii=False) if final is not None else ""
-    events = "\n".join(
-        json.dumps({"type": "mcp_tool_call", "tool": tool})
+    calls = [
+        tool if isinstance(tool, tuple) else ("yunxiao", tool)
         for tool in event_tools
+    ]
+    events = "\n".join(
+        json.dumps(
+            {
+                "type": "mcp_tool_call",
+                "server": server,
+                "tool": tool,
+                "status": "failed" if tool in (event_errors or {}) else "completed",
+                "error": (event_errors or {}).get(tool),
+            }
+        )
+        for server, tool in calls
     )
     source = f'''#!/usr/bin/env python3
 import pathlib
@@ -129,6 +147,90 @@ class YunxiaoLiveValidationTests(unittest.TestCase):
             )
 
             with self.assertRaisesRegex(ValidationFailure, "写工具"):
+                run_live_validation(binary, workspace)
+
+    def test_reported_tools_cannot_replace_host_observation(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="yunxiao-live-") as directory:
+            workspace = Path(directory)
+            final = {
+                "identity": "受控用户",
+                "organization": "受控组织",
+                "resource_kind": "project",
+                "resource": "受控项目",
+                "tools_used": ["get_current_user", "search_projects"],
+                "diagnostic": None,
+            }
+            binary = fake_codex(workspace, final)
+
+            with self.assertRaisesRegex(ValidationFailure, "宿主实际观察"):
+                run_live_validation(binary, workspace)
+
+    def test_unallowlisted_tool_is_rejected_before_it_can_be_filtered(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="yunxiao-live-") as directory:
+            workspace = Path(directory)
+            final = {
+                "identity": "受控用户",
+                "organization": "受控组织",
+                "resource_kind": "project",
+                "resource": "受控项目",
+                "tools_used": ["get_current_user", "search_projects"],
+                "diagnostic": None,
+            }
+            binary = fake_codex(
+                workspace,
+                final,
+                event_tools=(
+                    "get_current_user",
+                    "search_projects",
+                    "foreign_dangerous_tool",
+                ),
+            )
+
+            with self.assertRaisesRegex(ValidationFailure, "allowlist"):
+                run_live_validation(binary, workspace)
+
+    def test_matching_tool_name_from_another_server_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="yunxiao-live-") as directory:
+            workspace = Path(directory)
+            final = {
+                "identity": "受控用户",
+                "organization": "受控组织",
+                "resource_kind": "project",
+                "resource": "受控项目",
+                "tools_used": ["get_current_user", "search_projects"],
+                "diagnostic": None,
+            }
+            binary = fake_codex(
+                workspace,
+                final,
+                event_tools=(
+                    ("foreign", "get_current_user"),
+                    ("yunxiao", "search_projects"),
+                ),
+            )
+
+            with self.assertRaisesRegex(ValidationFailure, "非 yunxiao"):
+                run_live_validation(binary, workspace)
+
+    def test_failed_resource_call_cannot_count_as_validation_evidence(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="yunxiao-live-") as directory:
+            workspace = Path(directory)
+            final = {
+                "identity": "受控用户",
+                "organization": "受控组织",
+                "resource_kind": "project",
+                "resource": "模型声称的项目",
+                "tools_used": ["get_current_user", "search_projects"],
+                "diagnostic": None,
+            }
+            binary = fake_codex(
+                workspace,
+                final,
+                event_tools=("get_current_user", "search_projects"),
+                event_errors={"search_projects": "PERMISSION_DENIED: 403"},
+            )
+
+            with self.assertRaisesRegex(ValidationFailure, "权限不足"):
                 run_live_validation(binary, workspace)
 
 

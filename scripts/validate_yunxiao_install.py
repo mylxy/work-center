@@ -70,6 +70,14 @@ class LiveValidationResult:
     tools_used: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class ObservedMcpCall:
+    server: str | None
+    tool: str
+    status: str | None
+    error: str | None
+
+
 def _prompt(project_hint: str | None, work_item_hint: str | None) -> str:
     target = (
         f"读取明确指定的 Work Item {work_item_hint!r}。"
@@ -90,31 +98,50 @@ def _prompt(project_hint: str | None, work_item_hint: str | None) -> str:
     )
 
 
-def _collect_tool_names(value) -> set[str]:
-    found: set[str] = set()
+def _collect_mcp_calls(value) -> set[ObservedMcpCall]:
+    found: set[ObservedMcpCall] = set()
     if isinstance(value, dict):
-        for key, child in value.items():
-            if key in {"tool", "tool_name"} and isinstance(child, str):
-                for tool_name in ALLOWED_TOOLS:
-                    if child == tool_name or child.endswith(
-                        (f"__{tool_name}", f".{tool_name}", f"/{tool_name}")
-                    ):
-                        found.add(tool_name)
-            found.update(_collect_tool_names(child))
+        if value.get("type") == "mcp_tool_call":
+            tool = value.get("tool", value.get("tool_name"))
+            server = value.get("server", value.get("server_name"))
+            if isinstance(tool, str):
+                raw_error = value.get("error")
+                result = value.get("result")
+                if raw_error in (None, "") and isinstance(result, dict) and (
+                    result.get("isError") is True or result.get("is_error") is True
+                ):
+                    raw_error = result
+                error = None
+                if raw_error not in (None, ""):
+                    error = (
+                        raw_error
+                        if isinstance(raw_error, str)
+                        else json.dumps(raw_error, ensure_ascii=False, sort_keys=True)
+                    )
+                found.add(
+                    ObservedMcpCall(
+                        server=server if isinstance(server, str) else None,
+                        tool=tool,
+                        status=value.get("status") if isinstance(value.get("status"), str) else None,
+                        error=error,
+                    )
+                )
+        for child in value.values():
+            found.update(_collect_mcp_calls(child))
     elif isinstance(value, list):
         for child in value:
-            found.update(_collect_tool_names(child))
+            found.update(_collect_mcp_calls(child))
     return found
 
 
-def _event_tools(output: str) -> set[str]:
-    found: set[str] = set()
+def _event_mcp_calls(output: str) -> set[ObservedMcpCall]:
+    found: set[ObservedMcpCall] = set()
     for line in output.splitlines():
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
             continue
-        found.update(_collect_tool_names(event))
+        found.update(_collect_mcp_calls(event))
     return found
 
 
@@ -129,8 +156,13 @@ def _credential_match_labels(text: str) -> tuple[str, ...]:
     return tuple(label for label, pattern in patterns if re.search(pattern, text))
 
 
-def _contains_credential(text: str) -> bool:
-    return bool(_credential_match_labels(text))
+def _reject_credential_output(text: str, description: str) -> None:
+    labels = _credential_match_labels(text)
+    if labels:
+        matched_rules = ", ".join(labels)
+        raise ValidationFailure(
+            f"{description}触发凭证规则 {matched_rules}，已停止且不会显示原始内容。"
+        )
 
 
 def scan_credential_files(root: Path) -> tuple[Path, ...]:
@@ -148,7 +180,7 @@ def scan_credential_files(root: Path) -> tuple[Path, ...]:
             text = path.read_text(errors="ignore")
         except OSError:
             continue
-        if _contains_credential(text):
+        if _credential_match_labels(text):
             matches.append(relative)
     return tuple(matches)
 
@@ -251,47 +283,73 @@ def run_live_validation(
             ) from error
 
         combined = "\n".join((completed.stdout, completed.stderr))
-        event_tools = _event_tools(completed.stdout)
+        event_calls = _event_mcp_calls(completed.stdout)
+        event_tools = {call.tool for call in event_calls}
         if WRITE_TOOLS.intersection(event_tools):
             raise ValidationFailure("只读验收检测到写工具调用，已判定验收失败。")
-        credential_labels = _credential_match_labels(combined)
-        if credential_labels:
-            labels = ", ".join(credential_labels)
-            raise ValidationFailure(
-                f"验收输出触发凭证规则 {labels}，已停止且不会显示原始输出。"
-            )
+        _reject_credential_output(combined, "验收输出")
         if completed.returncode != 0 or not output_path.is_file():
             raise _diagnose(combined, event_tools)
 
         final_text = output_path.read_text()
-        credential_labels = _credential_match_labels(final_text)
-        if credential_labels:
-            labels = ", ".join(credential_labels)
-            raise ValidationFailure(
-                f"验收结果触发凭证规则 {labels}，已停止且不会显示原始结果。"
-            )
+        _reject_credential_output(final_text, "验收结果")
         try:
             final = json.loads(final_text)
         except json.JSONDecodeError as error:
             raise ValidationFailure("只读验收未返回预期的结构化结果。") from error
 
         reported_tools = set(final.get("tools_used", ()))
-        observed_tools = event_tools | reported_tools
-        if WRITE_TOOLS.intersection(observed_tools):
+        if WRITE_TOOLS.intersection(event_tools | reported_tools):
             raise ValidationFailure("只读验收检测到写工具调用，已判定验收失败。")
-        unexpected = observed_tools - set(ALLOWED_TOOLS)
+        foreign_servers = sorted(
+            {call.server or "<missing>" for call in event_calls if call.server != "yunxiao"}
+        )
+        if foreign_servers:
+            raise ValidationFailure(
+                "只读验收调用了非 yunxiao MCP server："
+                + ", ".join(foreign_servers)
+                + "。"
+            )
+        unexpected = (event_tools | reported_tools) - set(ALLOWED_TOOLS)
         if unexpected:
             raise ValidationFailure("只读验收使用了 allowlist 之外的工具。")
+        failed_calls = {
+            call
+            for call in event_calls
+            if call.error is not None or call.status in {"failed", "error"}
+        }
+        if failed_calls:
+            failure_text = "\n".join(
+                call.error or f"{call.tool}: {call.status}"
+                for call in sorted(failed_calls, key=lambda item: item.tool)
+            )
+            raise _diagnose(failure_text, event_tools)
+        successful_tools = {
+            call.tool
+            for call in event_calls
+            if call.status == "completed" and call.error is None
+        }
+        unfinished_tools = event_tools - successful_tools
+        if unfinished_tools:
+            raise ValidationFailure(
+                "只读验收缺少 MCP 工具成功完成事件："
+                + ", ".join(sorted(unfinished_tools))
+                + "。"
+            )
+        if reported_tools != successful_tools:
+            raise ValidationFailure(
+                "只读验收报告的工具与宿主实际观察记录不一致，无法作为验收证据。"
+            )
         diagnostic = final.get("diagnostic")
         if diagnostic:
-            raise _diagnose(str(diagnostic), observed_tools, expose_detail=True)
-        if not IDENTITY_TOOLS.intersection(observed_tools):
-            observed = ", ".join(sorted(observed_tools)) or "无"
+            raise _diagnose(str(diagnostic), event_tools, expose_detail=True)
+        if not IDENTITY_TOOLS.intersection(successful_tools):
+            observed = ", ".join(sorted(successful_tools)) or "无"
             raise ValidationFailure(
                 f"只读验收未验证当前 OAuth 身份或组织。已观察工具：{observed}。"
             )
-        if not RESOURCE_TOOLS.intersection(observed_tools):
-            observed = ", ".join(sorted(observed_tools)) or "无"
+        if not RESOURCE_TOOLS.intersection(successful_tools):
+            observed = ", ".join(sorted(successful_tools)) or "无"
             raise ValidationFailure(
                 "只读验收未验证任何有权限访问的项目或 Work Item。"
                 f"已观察工具：{observed}。"
@@ -304,7 +362,7 @@ def run_live_validation(
             organization=final["organization"],
             resource_kind=final["resource_kind"],
             resource=final["resource"],
-            tools_used=tuple(sorted(observed_tools)),
+            tools_used=tuple(sorted(successful_tools)),
         )
 
 

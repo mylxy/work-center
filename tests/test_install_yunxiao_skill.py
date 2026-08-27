@@ -131,6 +131,96 @@ class YunxiaoSkillInstallationTests(unittest.TestCase):
             self.assertEqual(config_path.read_text(), original)
             self.assertFalse((skill_root / "yunxiao-project").exists())
 
+    def test_nested_static_auth_table_stops_without_changes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="yunxiao-install-") as directory:
+            home = Path(directory)
+            skill_root = home / ".agents" / "skills"
+            config_path = home / ".codex" / "config.toml"
+            config_path.parent.mkdir(parents=True)
+            original = (
+                '[mcp_servers.yunxiao]\n'
+                f'url = "{HOSTED_ENDPOINT}"\n'
+                '[mcp_servers.yunxiao.http_headers]\n'
+                'X-Auth = "foreign-value"\n'
+            )
+            config_path.write_text(original)
+
+            with self.assertRaisesRegex(InstallationConflict, "non-OAuth"):
+                install(SOURCE_SKILL, skill_root, config_path)
+
+            self.assertEqual(config_path.read_text(), original)
+            self.assertFalse((skill_root / "yunxiao-project").exists())
+
+    def test_equivalent_noncanonical_mcp_tables_stop_without_changes(self) -> None:
+        table_headers = (
+            "[mcp_servers . yunxiao]",
+            '["mcp_servers"."yunxiao"]',
+        )
+        for table_header in table_headers:
+            with self.subTest(table_header=table_header):
+                with tempfile.TemporaryDirectory(prefix="yunxiao-install-") as directory:
+                    home = Path(directory)
+                    skill_root = home / ".agents" / "skills"
+                    config_path = home / ".codex" / "config.toml"
+                    config_path.parent.mkdir(parents=True)
+                    original = (
+                        f"{table_header}\n"
+                        'url = "https://different.example/mcp"\n'
+                    )
+                    config_path.write_text(original)
+
+                    with self.assertRaisesRegex(InstallationConflict, "unsupported"):
+                        install(SOURCE_SKILL, skill_root, config_path)
+
+                    self.assertEqual(config_path.read_text(), original)
+                    self.assertFalse((skill_root / "yunxiao-project").exists())
+
+    def test_inline_mcp_tables_stop_without_changes(self) -> None:
+        configs = (
+            (
+                "[mcp_servers]\n"
+                'yunxiao = { url = "https://different.example/mcp" }\n'
+            ),
+            (
+                "mcp_servers = { yunxiao = { "
+                'url = "https://different.example/mcp" } }\n'
+            ),
+        )
+        for original in configs:
+            with self.subTest(original=original):
+                with tempfile.TemporaryDirectory(prefix="yunxiao-install-") as directory:
+                    home = Path(directory)
+                    skill_root = home / ".agents" / "skills"
+                    config_path = home / ".codex" / "config.toml"
+                    config_path.parent.mkdir(parents=True)
+                    config_path.write_text(original)
+
+                    with self.assertRaisesRegex(InstallationConflict, "unsupported"):
+                        install(SOURCE_SKILL, skill_root, config_path)
+
+                    self.assertEqual(config_path.read_text(), original)
+                    self.assertFalse((skill_root / "yunxiao-project").exists())
+
+    def test_noncanonical_tool_policy_table_stops_without_changes(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="yunxiao-install-") as directory:
+            home = Path(directory)
+            skill_root = home / ".agents" / "skills"
+            config_path = home / ".codex" / "config.toml"
+            config_path.parent.mkdir(parents=True)
+            original = (
+                '[mcp_servers.yunxiao]\n'
+                f'url = "{HOSTED_ENDPOINT}"\n'
+                '[mcp_servers . yunxiao . tools . update_work_item]\n'
+                'approval_mode = "approve"\n'
+            )
+            config_path.write_text(original)
+
+            with self.assertRaisesRegex(InstallationConflict, "unsupported"):
+                install(SOURCE_SKILL, skill_root, config_path)
+
+            self.assertEqual(config_path.read_text(), original)
+            self.assertFalse((skill_root / "yunxiao-project").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

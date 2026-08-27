@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 
@@ -48,6 +49,16 @@ SERVER_HEADER = re.compile(
 )
 ANY_HEADER = re.compile(r"^\s*\[.*\]\s*(?:#.*)?$")
 ASSIGNMENT = re.compile(r"^\s*([A-Za-z0-9_-]+)\s*=\s*(.*?)\s*(?:#.*)?$")
+MCP_SERVERS_KEY = r'(?:mcp_servers|"mcp_servers"|\'mcp_servers\')'
+YUNXIAO_KEY = r'(?:yunxiao|"yunxiao"|\'yunxiao\')'
+TOOLS_KEY = r'(?:tools|"tools"|\'tools\')'
+YUNXIAO_TABLE_HEADER = re.compile(
+    rf'^\s*\[\s*{MCP_SERVERS_KEY}\s*\.\s*{YUNXIAO_KEY}(?:\s*\.|\s*\])'
+)
+YUNXIAO_DOTTED_KEY = re.compile(
+    rf'^\s*{MCP_SERVERS_KEY}\s*\.\s*{YUNXIAO_KEY}\s*\.'
+)
+TOOLS_DOTTED_KEY = re.compile(rf'^\s*{TOOLS_KEY}\s*\.')
 UNSAFE_AUTH_KEYS = {
     "bearer_token_env_var",
     "http_headers",
@@ -55,6 +66,11 @@ UNSAFE_AUTH_KEYS = {
     "command",
     "args",
 }
+UNSAFE_AUTH_SECTION = re.compile(
+    rf'^\s*\[\s*{MCP_SERVERS_KEY}\s*\.\s*{YUNXIAO_KEY}\s*\.\s*'
+    r'(?:http_headers|"http_headers"|env_http_headers|"env_http_headers")'
+    r'(?:\.|\s*\])'
+)
 
 
 class InstallationConflict(RuntimeError):
@@ -178,14 +194,18 @@ def _tool_policy_block(tool_name: str, approval_mode: str) -> list[str]:
     ]
 
 
+def _tool_policy_header(tool_name: str) -> re.Pattern:
+    return re.compile(
+        rf'^\s*\[\s*mcp_servers\.(?:yunxiao|"yunxiao")\.tools\.'
+        rf'(?:{re.escape(tool_name)}|"{re.escape(tool_name)}")\s*\]\s*(?:#.*)?$'
+    )
+
+
 def _validate_tool_policies(original: str) -> tuple[tuple[str, str], ...]:
     missing = []
     lines = original.splitlines()
     for tool_name, approval_mode in TOOL_APPROVALS:
-        header = re.compile(
-            rf'^\s*\[\s*mcp_servers\.(?:yunxiao|"yunxiao")\.tools\.'
-            rf'(?:{re.escape(tool_name)}|"{re.escape(tool_name)}")\s*\]\s*(?:#.*)?$'
-        )
+        header = _tool_policy_header(tool_name)
         matches = [index for index, line in enumerate(lines) if header.match(line)]
         if not matches:
             missing.append((tool_name, approval_mode))
@@ -215,12 +235,66 @@ def _validate_tool_policies(original: str) -> tuple[tuple[str, str], ...]:
     return tuple(missing)
 
 
+def _inspect_mcp_config(config_path: Path) -> dict | None:
+    """Use Codex's TOML parser to locate the logical Yunxiao MCP entry."""
+    if not config_path.exists():
+        return None
+    codex = shutil.which("codex")
+    if codex is None:
+        raise InstallationConflict(
+            "Codex CLI is required to inspect the existing MCP configuration"
+        )
+    with tempfile.TemporaryDirectory(prefix="yunxiao-config-inspect-") as directory:
+        temporary_home = Path(directory)
+        (temporary_home / "config.toml").symlink_to(config_path)
+        completed = subprocess.run(
+            [codex, "mcp", "get", "yunxiao", "--json"],
+            capture_output=True,
+            env={**os.environ, "CODEX_HOME": str(temporary_home)},
+            text=True,
+        )
+    if completed.returncode == 0:
+        try:
+            server = json.loads(completed.stdout)
+        except json.JSONDecodeError as error:
+            raise InstallationConflict(
+                "Codex returned an invalid MCP configuration inspection result"
+            ) from error
+        if not isinstance(server, dict):
+            raise InstallationConflict(
+                "Codex returned an invalid MCP configuration inspection result"
+            )
+        return server
+    if "No MCP server named 'yunxiao' found" in completed.stderr:
+        return None
+    raise InstallationConflict(
+        "existing Codex configuration could not be parsed safely; refusing to modify it"
+    )
+
+
 def _plan_mcp(config_path: Path) -> McpPlan:
     original = config_path.read_text() if config_path.exists() else ""
     lines = original.splitlines()
+    inspected_server = _inspect_mcp_config(config_path)
+    if any(UNSAFE_AUTH_SECTION.match(line) for line in lines):
+        raise InstallationConflict(
+            "existing Yunxiao MCP uses a non-OAuth transport or credential source"
+        )
+    supported_tool_headers = tuple(
+        _tool_policy_header(tool_name) for tool_name, _ in TOOL_APPROVALS
+    )
+    if any(
+        YUNXIAO_TABLE_HEADER.match(line)
+        and not SERVER_HEADER.match(line)
+        and not any(header.match(line) for header in supported_tool_headers)
+        for line in lines
+    ) or any(YUNXIAO_DOTTED_KEY.match(line) for line in lines):
+        raise InstallationConflict(
+            "existing Yunxiao MCP configuration has an unsupported structure"
+        )
     section = _server_section(lines)
     if section is None:
-        if re.search(r"mcp_servers\.(?:yunxiao|\"yunxiao\")", original):
+        if inspected_server is not None:
             raise InstallationConflict(
                 "existing Yunxiao MCP configuration has an unsupported structure"
             )
@@ -236,6 +310,36 @@ def _plan_mcp(config_path: Path) -> McpPlan:
         return McpPlan(prefix + "\n".join(block) + "\n", "configured")
 
     start, end = section
+    if any(TOOLS_DOTTED_KEY.match(line) for line in lines[start + 1 : end]):
+        raise InstallationConflict(
+            "existing Yunxiao MCP configuration has an unsupported tool policy structure"
+        )
+    if inspected_server is None:
+        raise InstallationConflict(
+            "existing Yunxiao MCP configuration could not be inspected safely"
+        )
+    transport = inspected_server.get("transport")
+    if not isinstance(transport, dict):
+        raise InstallationConflict("existing Yunxiao MCP transport is invalid")
+    if (
+        transport.get("type") != "streamable_http"
+        or transport.get("url") != HOSTED_ENDPOINT
+    ):
+        raise InstallationConflict(
+            "existing Yunxiao MCP points to a different endpoint; refusing to overwrite it"
+        )
+    if any(
+        transport.get(key) is not None
+        for key in ("bearer_token_env_var", "http_headers", "env_http_headers")
+    ):
+        raise InstallationConflict(
+            "existing Yunxiao MCP uses a non-OAuth transport or credential source"
+        )
+    inspected_tools = inspected_server.get("enabled_tools")
+    if inspected_tools is not None and inspected_tools != list(ALLOWED_TOOLS):
+        raise InstallationConflict(
+            "existing Yunxiao MCP has a conflicting enabled_tools policy"
+        )
     values = {}
     for line in lines[start + 1 : end]:
         match = ASSIGNMENT.match(line)
@@ -278,12 +382,12 @@ def _plan_mcp(config_path: Path) -> McpPlan:
     return McpPlan("\n".join(updated) + "\n", "configured")
 
 
-def _write_config(config_path: Path, text: str) -> None:
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    mode = config_path.stat().st_mode & 0o777 if config_path.exists() else 0o600
+def _atomic_write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    mode = path.stat().st_mode & 0o777 if path.exists() else 0o600
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=".yunxiao-config-",
-        dir=config_path.parent,
+        dir=path.parent,
         text=True,
     )
     temporary = Path(temporary_name)
@@ -291,7 +395,7 @@ def _write_config(config_path: Path, text: str) -> None:
         with os.fdopen(descriptor, "w") as stream:
             stream.write(text)
         os.chmod(temporary, mode)
-        os.replace(temporary, config_path)
+        os.replace(temporary, path)
     finally:
         if temporary.exists():
             temporary.unlink()
@@ -324,7 +428,7 @@ def _write_receipt(receipt_path: Path, source: Path, target: Path) -> None:
         "source": str(source),
         "installed_digest": _manifest_digest(_file_manifest(target)),
     }
-    _write_config(
+    _atomic_write_text(
         receipt_path,
         json.dumps(receipt, ensure_ascii=False, sort_keys=True) + "\n",
     )
@@ -344,7 +448,7 @@ def install(source: Path, skill_root: Path, config_path: Path) -> InstallationRe
     original_config = config_path.read_bytes() if config_path.exists() else None
     try:
         if mcp_plan.status == "configured":
-            _write_config(config_path, mcp_plan.text)
+            _atomic_write_text(config_path, mcp_plan.text)
         if skill_status in {"installed", "updated"}:
             _copy_skill(source, target, replace=skill_status == "updated")
         _write_receipt(receipt_path, source, target)
@@ -353,7 +457,7 @@ def install(source: Path, skill_root: Path, config_path: Path) -> InstallationRe
             if config_path.exists():
                 config_path.unlink()
         else:
-            _write_config(config_path, original_config.decode())
+            _atomic_write_text(config_path, original_config.decode())
         raise
     return InstallationResult(skill=skill_status, mcp=mcp_plan.status)
 
