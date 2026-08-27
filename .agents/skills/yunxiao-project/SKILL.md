@@ -1,20 +1,20 @@
 ---
 name: yunxiao-project
-description: Use only when the user explicitly invokes $yunxiao-project; safely resolve one Yunxiao Work Item URL, ID, or project-scoped Number and return a read-only compact or full view through the official hosted MCP.
+description: Use only when the user explicitly invokes $yunxiao-project; safely resolve and view one Yunxiao Work Item, or create one verified top-level comment through the official hosted MCP.
 metadata:
   disable-model-invocation: true
 ---
 
 # YunXiaoProject
 
-通过阿里云官方托管的云效 MCP，以当前用户的 OAuth 身份精确定位并读取一个 Work Item。支持 Work Item URL、Work Item ID 和限定在一个明确项目内的 Work Item Number，并保持全程只读。
+通过阿里云官方托管的云效 MCP，以当前用户的 OAuth 身份精确定位并读取一个 Work Item，或为它安全创建一条顶层评论。支持 Work Item URL、Work Item ID 和限定在一个明确项目内的 Work Item Number。
 
 ## 执行边界
 
 - 仅使用 `agents/openai.yaml` 声明的 `yunxiao` MCP；运行时只接受中心版托管端点及 `project-management` toolset。
-- 允许的项目管理能力只有 `search_workitems`、`get_work_item`、`list_work_item_comments` 和 `list_workitem_activities`。任何工具调用前先做能力门禁：ID/URL-ID 紧凑视图需要 `get_work_item` 与 `list_work_item_comments`；Number/URL-Number 还需要 `search_workitems`；完整视图还需要 `list_workitem_activities`。本次路径任一能力缺失时立即输出“缺少能力”并保持零工具调用，包括不得调用 `get_current_user` 等基础身份工具。只有能力门禁通过且 organization ID 仍缺失时，才可使用 MCP 自带的基础身份或组织发现工具确定当前身份与 organization ID。不得调用项目搜索或任何写工具。
+- 允许的项目管理能力只有 `search_workitems`、`get_work_item`、`list_work_item_comments`、`list_workitem_activities` 和 `create_work_item_comment`。任何工具调用前先做能力门禁：ID/URL-ID 紧凑视图需要 `get_work_item` 与 `list_work_item_comments`；Number/URL-Number 还需要 `search_workitems`；完整视图还需要 `list_workitem_activities`；评论创建需要 `get_work_item`、`create_work_item_comment` 与 `list_work_item_comments`。本次路径任一能力缺失时立即输出“缺少能力”并保持零工具调用，包括不得调用 `get_current_user` 等基础身份工具。只有能力门禁通过且 organization ID 仍缺失时，才可使用 MCP 自带的基础身份或组织发现工具确定当前身份与 organization ID。不得调用项目搜索、Status 更新或其他写工具。
 - 以 MCP 运行时公布的工具名称和输入 schema 为准。缺少本次读取需要的精确工具时停止，不用相近工具猜测替代。
-- 保持只读。不得更新 Status、创建评论或执行其他变更。
+- 读取路径保持只读；评论路径只创建一条顶层评论。不得更新 Status 或执行其他变更。
 - MCP 是唯一后端。连接失败时按下方错误分类停止，不切换到 CLI、curl、直接 OpenAPI 或浏览器自动化。
 - OAuth 凭证由宿主管理。不得索取、读取、显示或保存 PAT、OAuth token、Authorization header 或其他凭证。
 
@@ -65,16 +65,29 @@ metadata:
 - 呈现 `list_workitem_activities` 返回的最近活动，包括动作、详情和时间；
 - 不把活动解释成未返回的工作流规则，也不因完整视图扩大到其他 Work Item。
 
+## 创建顶层评论
+
+评论请求沿用上述配置和目标解析规则，但每次只接受一个已精确解析的 Work Item。请求包含多个目标，或要求回复、编辑、删除、置顶既有评论时，说明第一版只支持为单个 Work Item 创建一条顶层评论并停止，不调用写工具。
+
+1. 用户明确给出“评论原文”或等价的完整正文时，把该范围内的字符作为评论内容；保留空白、标点、大小写和换行，不润色，不添加签名、前后缀或时间戳。用户只描述评论意图时，根据意图生成一段可直接提交的完整评论草稿，不把“评论意图”等请求措辞写进正文。
+2. 在能力门禁通过后，先用 `get_work_item` 确认唯一目标。普通请求以 **业务预览** 展示 Work Item 身份和 **评论草稿** 的完整逐字内容，请用户确认后停止；此时不调用 `create_work_item_comment`。
+3. “直接评论”“立即执行”或“无需确认”等明确执行标记可以跳过业务预览。标记本身不是评论正文。Codex MCP 写工具审批和云效权限仍然生效；skill 不得声称或尝试绕过它们。
+4. 业务预览被用户确认，或请求含明确执行标记时，先调用一次 `list_work_item_comments` 并保留返回的评论 ID 集合作为写前快照；既有同文评论不自动取消用户明确请求。然后按运行时 schema 调用 `create_work_item_comment` 恰好一次，只传 organization ID、Work Item ID 和完整评论内容；不传 parent/reply、编辑、删除或置顶参数。
+5. 创建返回成功后，立即对同一 Work Item 再调用一次 `list_work_item_comments`。以创建响应中的评论 ID、作者身份和逐字内容确认该 ID 出现在回读结果中，且不属于写前快照。成功输出包含 Work Item、评论 ID、作者和完整内容；回读确认前不宣称成功。
+6. 如果创建调用可能已到达服务端但传输结果不明确，仍按第 5 步回读，不再次调用创建工具。缺少可信的创建响应时，即使写后出现不在快照中的同文评论 ID 和作者，也不能排除并发评论，不能满足“创建响应身份 + 回读”的成功证据；以 **结果不确定** 报告原始传输信息、写前/写后差异（包括任何新增匹配 ID）、已检查的 Work Item 和完整评论内容，明确说明不会自动重试，然后停止。只有既有同文评论时同样报告不确定。不要把这类写入结果归类为普通 MCP 连接失败，也不要建议直接重新提交。
+
 ## 区分错误
 
 失败时保留云效返回的有用业务信息，必须以以下加粗分类名称作为标题，并明确指出下一步：
 
 - **MCP 未配置或不可连接**：服务器未声明、初始化失败、工具发现请求本身失败，或运行时完全没有 `yunxiao` MCP 命名空间时使用。其他 MCP、内置工具或多代理工具的存在不能证明云效 MCP 已连接。指出需要安装或启用声明的 `yunxiao` 托管 MCP，并核对中心版 endpoint；停止。
 - **未认证或认证过期**：要求通过宿主重新完成云效 OAuth 授权；不建议 PAT。
-- **缺少能力**：至少一个属于 `yunxiao` MCP 命名空间的基础工具已暴露，证明云效 MCP 已连接，但本次路径缺少 `search_workitems`、`get_work_item`、`list_work_item_comments` 或 `list_workitem_activities` 中所需能力时使用；不得把其他命名空间的工具当作连接证据。点名缺少的工具，要求检查 `project-management` toolset 或服务端能力；停止。
+- **缺少能力**：至少一个属于 `yunxiao` MCP 命名空间的基础工具已暴露，证明云效 MCP 已连接，但本次路径缺少 `search_workitems`、`get_work_item`、`list_work_item_comments`、`list_workitem_activities` 或 `create_work_item_comment` 中所需能力时使用；不得把其他命名空间的工具当作连接证据。点名缺少的工具，要求检查 `project-management` toolset 或服务端能力；停止。
 - **配置不足**：点名缺少或无法唯一确定的 organization ID 或 project ID，并只请求该非敏感值。
 - **目标不唯一**：Work Item Number 搜索出现多个 `serialNumber` 精确匹配时，报告匹配数量并要求用户核对项目或提供 Work Item ID；不得选择目标。
-- **无权限**：返回云效的权限错误，并要求为当前 OAuth 身份授予目标 Work Item 的只读权限。
-- **目标不存在或输入无效**：指出该 Work Item ID 未找到或不被接受，不搜索相似目标。
+- **写入未获批准**：宿主返回用户取消或拒绝 `create_work_item_comment` 时使用。明确说明 Codex MCP 写工具审批未获批准、服务端调用没有执行；停止且不回读、不重试。
+- **无权限**：返回云效的权限错误，并按当前操作要求为 OAuth 身份授予目标 Work Item 的只读或评论创建权限。
+- **业务规则拒绝**：工具已执行且云效以业务校验、必填字段或项目规则明确拒绝当前操作时使用。保留错误码与消息，指出需要修改的评论内容或业务条件；停止且不自动重试。
+- **目标不存在或输入无效**：解析或读取目标时指出该 Work Item ID 未找到或不被接受，不搜索相似目标。已确认目标后的评论正文校验失败属于“业务规则拒绝”，不归入本类。
 
-任何成功或失败路径都不得触发真实 Status 更新、评论写入或其他副作用。
+除用户明确请求的单条顶层评论外，任何成功或失败路径都不得触发真实 Status 更新或其他副作用。

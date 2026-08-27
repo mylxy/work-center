@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 
 
+EXACT_COMMENT = "  Release ABC-42\n请保持发布窗口开放，直到回归测试全部通过。\nEND  "
 WORK_ITEM = {
     "id": "wi-controlled-123",
     "serialNumber": "DSDD-123",
@@ -46,28 +47,20 @@ ACTIVITIES = [
         "createdAt": "2026-08-25T09:00:00Z",
     },
 ]
+
+
+def error_result(message: str) -> dict:
+    return {
+        "content": [{"type": "text", "text": message}],
+        "isError": True,
+    }
+
+
 ERROR_RESULTS = {
-    "unauthenticated": {
-        "content": [
-            {
-                "type": "text",
-                "text": "UNAUTHENTICATED: OAuth session expired",
-            }
-        ],
-        "isError": True,
-    },
-    "permission-denied": {
-        "content": [
-            {
-                "type": "text",
-                "text": (
-                    "PERMISSION_DENIED: no read access to Work Item "
-                    "wi-controlled-123"
-                ),
-            }
-        ],
-        "isError": True,
-    },
+    "unauthenticated": error_result("UNAUTHENTICATED: OAuth session expired"),
+    "permission-denied": error_result(
+        "PERMISSION_DENIED: no read access to Work Item wi-controlled-123"
+    ),
 }
 
 
@@ -78,6 +71,20 @@ def parse_args() -> argparse.Namespace:
         "--scenario",
         choices=(
             "success",
+            "exact-comment",
+            "intent-preview",
+            "comment-transport-uncertain",
+            "comment-transport-preexisting",
+            "comment-transport-confirmed",
+            "comment-business-error",
+            "comment-permission-denied",
+            "comment-unauthenticated",
+            "comment-missing-tool",
+            "comment-approval-required",
+            "direct-intent-comment",
+            "top-level-only",
+            "existing-comment-mutations",
+            "multiple-comment-targets",
             "number-compact",
             "url-compact",
             "missing-project",
@@ -213,17 +220,27 @@ def activities_tool_definition() -> dict:
 
 
 def write_tool_definition(name: str, title: str) -> dict:
+    properties = {
+        "organizationId": {"type": "string"},
+        "workItemId": {"type": "string"},
+    }
+    required = ["organizationId", "workItemId"]
+    if name == "create_work_item_comment":
+        properties["content"] = {"type": "string"}
+        required.append("content")
+    description = (
+        "Create one controlled top-level Work Item comment."
+        if name == "create_work_item_comment"
+        else "Controlled write trap; this scenario must never call it."
+    )
     return {
         "name": name,
-        "description": "Controlled write trap; read-only scenarios must never call this.",
+        "description": description,
         "inputSchema": {
             "type": "object",
-            "properties": {
-                "organizationId": {"type": "string"},
-                "workItemId": {"type": "string"},
-            },
-            "required": ["organizationId", "workItemId"],
-            "additionalProperties": True,
+            "properties": properties,
+            "required": required,
+            "additionalProperties": False,
         },
         "annotations": {
             "title": title,
@@ -289,7 +306,12 @@ def search_results(scenario: str) -> list[dict]:
     ]
 
 
-def tool_result(scenario: str, name: str, arguments: dict) -> dict:
+def tool_result(
+    scenario: str,
+    name: str,
+    arguments: dict,
+    comments: list[dict],
+) -> dict:
     if name == "get_work_item" and scenario in ERROR_RESULTS:
         return ERROR_RESULTS[scenario]
     if name == "search_workitems":
@@ -298,26 +320,84 @@ def tool_result(scenario: str, name: str, arguments: dict) -> dict:
         if scenario == "full-detail" and not arguments.get("cursor"):
             return success_result(
                 {
-                    "comments": COMMENTS[:4],
+                    "comments": comments[:4],
                     "nextCursor": "comments-page-2",
                 }
             )
         if scenario == "full-detail" and arguments.get("cursor") == "comments-page-2":
-            return success_result({"comments": COMMENTS[4:], "nextCursor": None})
-        return success_result({"comments": COMMENTS})
+            return success_result({"comments": comments[4:], "nextCursor": None})
+        return success_result({"comments": comments})
     if name == "list_workitem_activities":
         return success_result({"activities": ACTIVITIES})
-    if name in {"update_work_item", "create_work_item_comment"}:
-        return {
-            "content": [{"type": "text", "text": "WRITE_TRAP_CALLED"}],
-            "isError": True,
+    if name == "create_work_item_comment" and scenario in {
+        "comment-transport-uncertain",
+        "comment-transport-preexisting",
+    }:
+        return error_result(
+            "TRANSPORT_UNCERTAIN: connection closed before the create response was received"
+        )
+    if name == "create_work_item_comment" and scenario == "comment-business-error":
+        return error_result(
+            "INVALID_ARGUMENT: comment content violates the project text policy"
+        )
+    if name == "create_work_item_comment" and scenario == "comment-permission-denied":
+        return error_result(
+            "PERMISSION_DENIED: current OAuth identity cannot create comments "
+            "on wi-controlled-123"
+        )
+    if name == "create_work_item_comment" and scenario == "comment-unauthenticated":
+        return error_result(
+            "UNAUTHENTICATED: OAuth session expired before comment creation"
+        )
+    successful_comment_scenarios = {
+        "exact-comment",
+        "comment-approval-required",
+        "comment-transport-confirmed",
+        "direct-intent-comment",
+    }
+    if name == "create_work_item_comment" and scenario in successful_comment_scenarios:
+        created_comment = {
+            "id": "comment-created-1",
+            "author": {
+                "id": "user-controlled",
+                "name": "受控执行用户",
+            },
+            "content": arguments["content"],
+            "createdAt": "2026-08-27T12:00:00Z",
         }
+        comments.append(created_comment)
+        if scenario == "comment-transport-confirmed":
+            return error_result(
+                "TRANSPORT_UNCERTAIN: response stream closed after the server "
+                "accepted the comment"
+            )
+        return success_result(
+            {
+                "comment": created_comment,
+                "currentUser": created_comment["author"],
+            }
+        )
+    if name in {"update_work_item", "create_work_item_comment"}:
+        return error_result("WRITE_TRAP_CALLED")
     return success_result(WORK_ITEM)
 
 
 def main() -> None:
     args = parse_args()
     log_path = Path(args.log)
+    comments = [dict(comment) for comment in COMMENTS]
+    if args.scenario == "comment-transport-preexisting":
+        comments.append(
+            {
+                "id": "comment-preexisting",
+                "author": {
+                    "id": "user-controlled",
+                    "name": "受控执行用户",
+                },
+                "content": EXACT_COMMENT,
+                "createdAt": "2026-08-26T12:00:00Z",
+            }
+        )
 
     for line in sys.stdin:
         message = json.loads(line)
@@ -342,21 +422,23 @@ def main() -> None:
             continue
 
         if method == "tools/list":
-            tools = (
-                [identity_tool_definition()]
-                if args.scenario == "missing-tool"
-                else [
+            if args.scenario == "missing-tool":
+                tools = [identity_tool_definition()]
+            else:
+                tools = [
                     tool_definition(),
                     search_tool_definition(),
                     comments_tool_definition(),
                     activities_tool_definition(),
                     write_tool_definition("update_work_item", "Update Work Item"),
-                    write_tool_definition(
-                        "create_work_item_comment",
-                        "Create Work Item Comment",
-                    ),
                 ]
-            )
+                if args.scenario != "comment-missing-tool":
+                    tools.append(
+                        write_tool_definition(
+                            "create_work_item_comment",
+                            "Create Work Item Comment",
+                        )
+                    )
             send(
                 {
                     "jsonrpc": "2.0",
@@ -377,6 +459,7 @@ def main() -> None:
                         args.scenario,
                         message["params"]["name"],
                         message["params"].get("arguments", {}),
+                        comments,
                     ),
                 }
             )
