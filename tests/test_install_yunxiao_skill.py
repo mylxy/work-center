@@ -16,7 +16,7 @@ from scripts.install_yunxiao_skill import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_SKILL = ROOT / ".agents" / "skills" / "yunxiao-project"
+SOURCE_SKILL = ROOT / "skills" / "yunxiao-project"
 
 
 def load_server(config_home: Path) -> dict:
@@ -81,7 +81,7 @@ class YunxiaoSkillInstallationTests(unittest.TestCase):
     def test_updates_only_an_unchanged_skill_from_the_same_source(self) -> None:
         with tempfile.TemporaryDirectory(prefix="yunxiao-install-") as directory:
             home = Path(directory)
-            source = home / "repo" / ".agents" / "skills" / "yunxiao-project"
+            source = home / "repo" / "skills" / "yunxiao-project"
             source.parent.mkdir(parents=True)
             shutil.copytree(SOURCE_SKILL, source)
             skill_root = home / ".agents" / "skills"

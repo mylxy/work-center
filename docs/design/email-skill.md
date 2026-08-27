@@ -8,7 +8,7 @@ The user wants Codex to read and send Alibaba Mail without routine webmail login
 
 ## Package
 
-- Create an explicit-only `$email` skill under `.agents/skills/email`.
+- Create an explicit-only `$email` skill under `skills/email`.
 - Bundle a Python 3.12 standard-library CLI at `scripts/mailctl`; do not require a daemon, MCP server, global command, virtual environment, or runtime package download.
 - Install the skill with the repository's symlink pattern and keep the repository copy authoritative.
 - Use IMAP over TLS on port 993 and SMTP over TLS on port 465. The first version has one `default` Mailbox Account and fixes `From` to that account.

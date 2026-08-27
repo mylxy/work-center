@@ -470,7 +470,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--source",
         type=Path,
-        default=root / ".agents" / "skills" / "yunxiao-project",
+        default=root / "skills" / "yunxiao-project",
     )
     parser.add_argument(
         "--skill-root",

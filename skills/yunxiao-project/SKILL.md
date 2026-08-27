@@ -1,7 +1,8 @@
 ---
 name: yunxiao-project
 description: Use only when the user explicitly invokes $yunxiao-project; safely resolve one Yunxiao Work Item, then read it, transition its Status, or create one verified top-level comment through the official hosted MCP.
-disable-model-invocation: true
+metadata:
+  disable-model-invocation: true
 ---
 
 # YunXiaoProject

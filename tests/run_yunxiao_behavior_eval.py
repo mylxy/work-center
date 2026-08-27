@@ -12,7 +12,7 @@ from controlled_yunxiao_mcp import EXACT_COMMENT
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SKILL = ROOT / ".agents" / "skills" / "yunxiao-project"
+SKILL = ROOT / "skills" / "yunxiao-project"
 SERVER = Path(__file__).with_name("controlled_yunxiao_mcp.py")
 DEFAULT_PROMPT = "$yunxiao-project 请读取 Work Item ID wi-controlled-123。"
 COMMON_WORK_ITEM_EXPECTATIONS = (

@@ -7,7 +7,7 @@ from tests.validate_yunxiao_skill import validate_skill
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SKILL = ROOT / ".agents" / "skills" / "yunxiao-project"
+SKILL = ROOT / "skills" / "yunxiao-project"
 
 
 class YunxiaoProjectPackageTests(unittest.TestCase):
@@ -16,7 +16,7 @@ class YunxiaoProjectPackageTests(unittest.TestCase):
 
     def test_validator_reports_malformed_nested_metadata(self) -> None:
         with tempfile.TemporaryDirectory(prefix="yunxiao-validator-") as directory:
-            candidate = Path(directory) / ".agents" / "skills" / "yunxiao-project"
+            candidate = Path(directory) / "skills" / "yunxiao-project"
             candidate.parent.mkdir(parents=True)
             shutil.copytree(SKILL, candidate)
             (candidate / "agents" / "openai.yaml").write_text(
@@ -45,7 +45,7 @@ class YunxiaoProjectPackageTests(unittest.TestCase):
 
     def test_profile_accepts_optional_default_project_id(self) -> None:
         with tempfile.TemporaryDirectory(prefix="yunxiao-validator-") as directory:
-            candidate = Path(directory) / ".agents" / "skills" / "yunxiao-project"
+            candidate = Path(directory) / "skills" / "yunxiao-project"
             candidate.parent.mkdir(parents=True)
             shutil.copytree(SKILL, candidate)
             (candidate / "profile.yaml").write_text(
@@ -60,7 +60,7 @@ class YunxiaoProjectPackageTests(unittest.TestCase):
 
     def test_validator_requires_status_transition_reference(self) -> None:
         with tempfile.TemporaryDirectory(prefix="yunxiao-validator-") as directory:
-            candidate = Path(directory) / ".agents" / "skills" / "yunxiao-project"
+            candidate = Path(directory) / "skills" / "yunxiao-project"
             candidate.parent.mkdir(parents=True)
             shutil.copytree(SKILL, candidate)
             (candidate / "references" / "status-transition.md").unlink()
@@ -74,7 +74,7 @@ class YunxiaoProjectPackageTests(unittest.TestCase):
 
     def test_validator_rejects_unfinished_scaffolding(self) -> None:
         with tempfile.TemporaryDirectory(prefix="yunxiao-validator-") as directory:
-            candidate = Path(directory) / ".agents" / "skills" / "yunxiao-project"
+            candidate = Path(directory) / "skills" / "yunxiao-project"
             candidate.parent.mkdir(parents=True)
             shutil.copytree(SKILL, candidate)
             with (candidate / "SKILL.md").open("a") as skill:
