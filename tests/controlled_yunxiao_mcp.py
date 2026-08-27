@@ -47,6 +47,36 @@ ACTIVITIES = [
         "createdAt": "2026-08-25T09:00:00Z",
     },
 ]
+WORKFLOW = {
+    "statuses": [
+        {"id": "status-pending", "name": "待处理"},
+        {"id": "status-processing", "name": "处理中"},
+        {"id": "status-done", "name": "已完成"},
+    ]
+}
+CURRENT_USER = {
+    "id": "user-controlled",
+    "name": "执行用户",
+    "organizationId": "org-controlled",
+}
+TRANSPORT_UNCERTAIN_ERROR = (
+    "TRANSPORT_UNCERTAIN: connection dropped after request dispatch"
+)
+STATUS_UPDATE_ERRORS = {
+    "status-workflow-rejected": (
+        "WORKFLOW_RESTRICTION: transition from status-processing "
+        "to status-done is not allowed"
+    ),
+    "status-role-rejected": "ROLE_RESTRICTION: Resolver role is required",
+    "status-permission-rejected": (
+        "PERMISSION_DENIED: no update access to this Work Item"
+    ),
+    "status-required-field-rejected": (
+        "REQUIRED_FIELD: resolution must be set before this transition"
+    ),
+    "status-transport-uncertain": TRANSPORT_UNCERTAIN_ERROR,
+    "status-transport-mismatch": TRANSPORT_UNCERTAIN_ERROR,
+}
 
 
 def error_result(message: str) -> dict:
@@ -95,6 +125,18 @@ def parse_args() -> argparse.Namespace:
             "unauthenticated",
             "permission-denied",
             "missing-tool",
+            "status-preview",
+            "status-zero-match",
+            "status-multiple-match",
+            "status-host-approval-required",
+            "status-workflow-rejected",
+            "status-role-rejected",
+            "status-permission-rejected",
+            "status-required-field-rejected",
+            "status-transport-uncertain",
+            "status-transport-mismatch",
+            "status-verification-mismatch",
+            "status-direct-success",
         ),
         default="success",
     )
@@ -140,6 +182,30 @@ def identity_tool_definition() -> dict:
         },
         "annotations": {
             "title": "Get Current User",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+    }
+
+
+def workflow_tool_definition() -> dict:
+    return {
+        "name": "get_work_item_workflow",
+        "description": "Read the workflow for one Work Item project and type.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "organizationId": {"type": "string"},
+                "projectId": {"type": "string"},
+                "workItemType": {"type": "string"},
+            },
+            "required": ["organizationId", "projectId", "workItemType"],
+            "additionalProperties": False,
+        },
+        "annotations": {
+            "title": "Get Work Item Workflow",
             "readOnlyHint": True,
             "destructiveHint": False,
             "idempotentHint": True,
@@ -252,6 +318,30 @@ def write_tool_definition(name: str, title: str) -> dict:
     }
 
 
+def update_tool_definition() -> dict:
+    return {
+        "name": "update_work_item",
+        "description": "Update the Status of exactly one Work Item by Status ID.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "organizationId": {"type": "string"},
+                "workItemId": {"type": "string"},
+                "statusId": {"type": "string"},
+            },
+            "required": ["organizationId", "workItemId", "statusId"],
+            "additionalProperties": False,
+        },
+        "annotations": {
+            "title": "Update Work Item Status",
+            "readOnlyHint": False,
+            "destructiveHint": True,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+    }
+
+
 def success_result(data: dict) -> dict:
     return {
         "content": [
@@ -311,6 +401,7 @@ def tool_result(
     name: str,
     arguments: dict,
     comments: list[dict],
+    state: dict,
 ) -> dict:
     if name == "get_work_item" and scenario in ERROR_RESULTS:
         return ERROR_RESULTS[scenario]
@@ -329,6 +420,19 @@ def tool_result(
         return success_result({"comments": comments})
     if name == "list_workitem_activities":
         return success_result({"activities": ACTIVITIES})
+    if name == "get_current_user":
+        return success_result(CURRENT_USER)
+    if name == "get_work_item_workflow":
+        if scenario == "status-multiple-match":
+            return success_result(
+                {
+                    "statuses": [
+                        *WORKFLOW["statuses"],
+                        {"id": "status-done-duplicate", "name": "已完成"},
+                    ]
+                }
+            )
+        return success_result(WORKFLOW)
     if name == "create_work_item_comment" and scenario in {
         "comment-transport-uncertain",
         "comment-transport-preexisting",
@@ -377,9 +481,33 @@ def tool_result(
                 "currentUser": created_comment["author"],
             }
         )
+    if name == "update_work_item" and scenario in {
+        "status-direct-success",
+        "status-host-approval-required",
+        "status-verification-mismatch",
+    }:
+        if arguments.get("statusId") != "status-done":
+            return error_result("INVALID_STATUS_ID")
+        state["status_updated"] = True
+        return success_result({"id": WORK_ITEM["id"], "statusId": "status-done"})
+    if name == "update_work_item" and scenario == "status-transport-mismatch":
+        state["status_updated"] = True
+    if name == "update_work_item" and scenario in STATUS_UPDATE_ERRORS:
+        return error_result(STATUS_UPDATE_ERRORS[scenario])
     if name in {"update_work_item", "create_work_item_comment"}:
         return error_result("WRITE_TRAP_CALLED")
-    return success_result(WORK_ITEM)
+    work_item = dict(WORK_ITEM)
+    if scenario in {
+        "status-verification-mismatch",
+        "status-transport-mismatch",
+    } and state.get("status_updated"):
+        work_item["status"] = {"id": "status-done-alias", "name": "已完成"}
+    elif scenario in {
+        "status-direct-success",
+        "status-host-approval-required",
+    } and state.get("status_updated"):
+        work_item["status"] = {"id": "status-done", "name": "已完成"}
+    return success_result(work_item)
 
 
 def main() -> None:
@@ -398,6 +526,7 @@ def main() -> None:
                 "createdAt": "2026-08-26T12:00:00Z",
             }
         )
+    state = {"status_updated": False}
 
     for line in sys.stdin:
         message = json.loads(line)
@@ -426,11 +555,13 @@ def main() -> None:
                 tools = [identity_tool_definition()]
             else:
                 tools = [
+                    identity_tool_definition(),
                     tool_definition(),
                     search_tool_definition(),
                     comments_tool_definition(),
                     activities_tool_definition(),
-                    write_tool_definition("update_work_item", "Update Work Item"),
+                    workflow_tool_definition(),
+                    update_tool_definition(),
                 ]
                 if args.scenario != "comment-missing-tool":
                     tools.append(
@@ -460,6 +591,7 @@ def main() -> None:
                         message["params"]["name"],
                         message["params"].get("arguments", {}),
                         comments,
+                        state,
                     ),
                 }
             )
