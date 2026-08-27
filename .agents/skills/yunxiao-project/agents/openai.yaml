@@ -1,7 +1,7 @@
 interface:
   display_name: "YunXiaoProject"
-  short_description: "通过云效官方MCP按WorkItemID安全读取基础详情"
-  default_prompt: "使用 $yunxiao-project 读取 Work Item ID wi-example-123。"
+  short_description: "通过云效官方MCP精确解析并只读查看单个WorkItem"
+  default_prompt: "使用 $yunxiao-project 读取 Work Item Number DSDD-123。"
 dependencies:
   tools:
     - type: "mcp"
