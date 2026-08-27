@@ -1,0 +1,6 @@
+interface:
+  display_name: "Email"
+  short_description: "通过受控 IMAP/SMTP 安全读取并发送阿里企业邮箱"
+  default_prompt: "使用 $email 搜索指定同事昨天发送的邮件。"
+policy:
+  allow_implicit_invocation: false
