@@ -86,7 +86,7 @@ EXACT_COMMENT_CREATE_CALL = tool_call(
     content=EXACT_COMMENT,
 )
 EXACT_COMMENT_FAILURE_CALLS = (*DEFAULT_READ_CALLS, EXACT_COMMENT_CREATE_CALL)
-EXACT_COMMENT_SUCCESS_CALLS = (
+EXACT_COMMENT_WRITE_AND_REREAD_CALLS = (
     *EXACT_COMMENT_FAILURE_CALLS,
     tool_call("list_work_item_comments", workItemId="wi-controlled-123"),
 )
@@ -113,7 +113,7 @@ SCENARIOS = {
     "exact-comment": {
         "prompt": DIRECT_EXACT_COMMENT_PROMPT,
         "expected": (EXACT_COMMENT, "comment-created-1", "受控执行用户"),
-        "calls": EXACT_COMMENT_SUCCESS_CALLS,
+        "calls": EXACT_COMMENT_WRITE_AND_REREAD_CALLS,
         "comment_write_sequence": True,
         "allow_controlled_write": True,
     },
@@ -143,7 +143,7 @@ SCENARIOS = {
             "不会自动",
             EXACT_COMMENT,
         ),
-        "calls": EXACT_COMMENT_SUCCESS_CALLS,
+        "calls": EXACT_COMMENT_WRITE_AND_REREAD_CALLS,
         "comment_write_sequence": True,
         "allow_controlled_write": True,
     },
@@ -154,7 +154,7 @@ SCENARIOS = {
             "comment-preexisting",
             "不会自动",
         ),
-        "calls": EXACT_COMMENT_SUCCESS_CALLS,
+        "calls": EXACT_COMMENT_WRITE_AND_REREAD_CALLS,
         "comment_write_sequence": True,
         "allow_controlled_write": True,
     },
@@ -251,7 +251,7 @@ SCENARIOS = {
             "不会自动",
             EXACT_COMMENT,
         ),
-        "calls": EXACT_COMMENT_SUCCESS_CALLS,
+        "calls": EXACT_COMMENT_WRITE_AND_REREAD_CALLS,
         "comment_write_sequence": True,
         "allow_controlled_write": True,
     },
