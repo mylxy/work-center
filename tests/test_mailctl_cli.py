@@ -35,6 +35,44 @@ def load_mailctl_module():
     return module
 
 
+class SearchImapStub:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def login(self, address, password):
+        return "OK", []
+
+    def select(self, folder, readonly):
+        return "OK", []
+
+    def response(self, name):
+        return "UIDVALIDITY", [b"7"]
+
+    def logout(self):
+        return "BYE", []
+
+
+def run_search_with_imap(project: Path, module, imap_type, *args: str):
+    def fake_run(command, **kwargs):
+        if command[0] == "git":
+            return subprocess.CompletedProcess(command, 1, "", "")
+        return subprocess.CompletedProcess(command, 0, "<REDACTED>\n", "")
+
+    previous = Path.cwd()
+    output = io.StringIO()
+    try:
+        os.chdir(project)
+        with (
+            mock.patch.object(module.subprocess, "run", side_effect=fake_run),
+            mock.patch.object(module.imaplib, "IMAP4_SSL", imap_type),
+            redirect_stdout(output),
+        ):
+            exit_code = module.main(["search", *args])
+    finally:
+        os.chdir(previous)
+    return exit_code, json.loads(output.getvalue())
+
+
 class MailctlCliTests(unittest.TestCase):
     def test_init_creates_project_local_state_and_config(self) -> None:
         with tempfile.TemporaryDirectory(prefix="mailctl-project-") as directory:
@@ -313,19 +351,7 @@ class MailctlCliTests(unittest.TestCase):
             self.assertEqual(initialized.returncode, 0, initialized.stderr)
             module = load_mailctl_module()
 
-            class AlibabaLikeImap:
-                def __init__(self, *args, **kwargs):
-                    pass
-
-                def login(self, address, password):
-                    return "OK", []
-
-                def select(self, folder, readonly):
-                    return "OK", []
-
-                def response(self, name):
-                    return "UIDVALIDITY", [b"7"]
-
+            class AlibabaLikeImap(SearchImapStub):
                 def uid(self, *query):
                     if query[0] == "SEARCH":
                         if "FROM" in query:
@@ -356,43 +382,25 @@ class MailctlCliTests(unittest.TestCase):
                         (b" BODY[TEXT]<0> {4}", b"body"),
                     ]
 
-                def logout(self):
-                    return "BYE", []
-
-            def fake_run(command, **kwargs):
-                if command[0] == "git":
-                    return subprocess.CompletedProcess(command, 1, "", "")
-                return subprocess.CompletedProcess(command, 0, "<REDACTED>\n", "")
-
-            previous = Path.cwd()
-            output = io.StringIO()
-            try:
-                os.chdir(project)
-                with (
-                    mock.patch.object(module.subprocess, "run", side_effect=fake_run),
-                    mock.patch.object(module.imaplib, "IMAP4_SSL", AlibabaLikeImap),
-                    redirect_stdout(output),
-                ):
-                    common_args = [
-                        "search",
-                        "--from",
-                        "alice@example.com",
-                        "--since",
-                        "2026-08-26T00:00:00+08:00",
-                        "--limit",
-                        "2",
-                    ]
-                    first_exit_code = module.main(common_args)
-                    first_page = json.loads(output.getvalue())
-
-                    output.seek(0)
-                    output.truncate()
-                    second_exit_code = module.main(
-                        [*common_args, "--cursor", first_page["next_cursor"]]
-                    )
-                    second_page = json.loads(output.getvalue())
-            finally:
-                os.chdir(previous)
+            common_args = [
+                "--from",
+                "alice@example.com",
+                "--since",
+                "2026-08-26T00:00:00+08:00",
+                "--limit",
+                "2",
+            ]
+            first_exit_code, first_page = run_search_with_imap(
+                project, module, AlibabaLikeImap, *common_args
+            )
+            second_exit_code, second_page = run_search_with_imap(
+                project,
+                module,
+                AlibabaLikeImap,
+                *common_args,
+                "--cursor",
+                first_page["next_cursor"],
+            )
 
             self.assertEqual(first_exit_code, 0, first_page)
             self.assertEqual([item["uid"] for item in first_page["items"]], [4, 2])
@@ -408,48 +416,19 @@ class MailctlCliTests(unittest.TestCase):
             self.assertEqual(initialized.returncode, 0, initialized.stderr)
             module = load_mailctl_module()
 
-            class RejectingImap:
-                def __init__(self, *args, **kwargs):
-                    pass
-
-                def login(self, address, password):
-                    return "OK", []
-
-                def select(self, folder, readonly):
-                    return "OK", []
-
-                def response(self, name):
-                    return "UIDVALIDITY", [b"7"]
-
+            class RejectingImap(SearchImapStub):
                 def uid(self, *query):
                     raise module.imaplib.IMAP4.error(
                         "BAD invalid command or parameters"
                     )
 
-                def logout(self):
-                    return "BYE", []
-
-            def fake_run(command, **kwargs):
-                if command[0] == "git":
-                    return subprocess.CompletedProcess(command, 1, "", "")
-                return subprocess.CompletedProcess(command, 0, "<REDACTED>\n", "")
-
-            previous = Path.cwd()
-            output = io.StringIO()
-            try:
-                os.chdir(project)
-                with (
-                    mock.patch.object(module.subprocess, "run", side_effect=fake_run),
-                    mock.patch.object(module.imaplib, "IMAP4_SSL", RejectingImap),
-                    redirect_stdout(output),
-                ):
-                    exit_code = module.main(
-                        ["search", "--since", "2026-08-26T00:00:00+08:00"]
-                    )
-            finally:
-                os.chdir(previous)
-
-            result = json.loads(output.getvalue())
+            exit_code, result = run_search_with_imap(
+                project,
+                module,
+                RejectingImap,
+                "--since",
+                "2026-08-26T00:00:00+08:00",
+            )
             self.assertEqual(exit_code, 2, result)
             self.assertEqual(result["category"], "capability")
             self.assertEqual(result["message"], "IMAP search rejected by server")
