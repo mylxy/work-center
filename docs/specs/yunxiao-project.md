@@ -115,4 +115,4 @@ skill 接受 Work Item URL、Work Item Number 或 Work Item ID。它将输入解
 - Official Yunxiao APIs distinguish opaque Work Item IDs from human-visible Work Item Numbers. Number resolution remains project-scoped.
 - Status updates require a Status ID. Workflow configuration may constrain transitions by current Status, role, user, or required fields.
 - Hosted MCP improves installation simplicity but limits client-side access to server logs and server-version control. Capability discovery, actionable error reporting, and write-after-read verification compensate for those constraints.
-- The current project contains a domain glossary but no issue-tracker configuration or triage-label vocabulary. Publishing this specification and applying `ready-for-agent` must wait until `/setup-matt-pocock-skills` has configured the project tracker.
+- This specification is published as GitHub Issue #1 with the `ready-for-agent` label: https://github.com/mylxy/work-center/issues/1
