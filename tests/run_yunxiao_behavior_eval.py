@@ -2,13 +2,13 @@
 import argparse
 import json
 from pathlib import Path
-import re
+import shutil
 import subprocess
 import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SKILL = ROOT / "skills" / "yunxiao-project"
+SKILL = ROOT / ".agents" / "skills" / "yunxiao-project"
 SERVER = Path(__file__).with_name("controlled_yunxiao_mcp.py")
 SCENARIO_EXPECTATIONS = {
     "success": ("wi-controlled-123", "电池状态接口超时", "Bug", "处理中"),
@@ -19,7 +19,6 @@ SCENARIO_EXPECTATIONS = {
 }
 NO_CALL_SCENARIOS = {"missing-tool", "unconfigured"}
 NO_MCP_SCENARIOS = {"unconfigured"}
-EXPLICIT_INVOCATION = re.compile(r"(?<![\w-])\$yunxiao-project(?![\w-])")
 
 
 def parse_args() -> argparse.Namespace:
@@ -32,29 +31,8 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def build_invocation_prompt(
-    user_prompt: str,
-    skill_text: str,
-    profile_text: str,
-) -> str:
-    """Model the host boundary: inject package context only for an explicit mention."""
-    if not EXPLICIT_INVOCATION.search(user_prompt):
-        return user_prompt
-    return f"""<skill>
-{skill_text}
-</skill>
-
-<profile>
-{profile_text}
-</profile>
-
-{user_prompt}
-"""
-
-
 def main() -> None:
     args = parse_args()
-    skill_text = (SKILL / "SKILL.md").read_text()
     profile_text = (
         'mcp_endpoint: "https://openapi-rdc.aliyuncs.com/ai/mcp?toolsets=project-management"\n'
         'organization_id: "org-controlled"\n'
@@ -64,8 +42,11 @@ def main() -> None:
         workspace = Path(directory)
         call_log = workspace / "calls.jsonl"
         final_output = workspace / "final.txt"
-        user_prompt = "$yunxiao-project 请读取 Work Item ID wi-controlled-123。"
-        prompt = build_invocation_prompt(user_prompt, skill_text, profile_text)
+        installed_skill = workspace / ".agents" / "skills" / "yunxiao-project"
+        shutil.copytree(SKILL, installed_skill)
+        (installed_skill / "profile.yaml").write_text(profile_text)
+        subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+        prompt = "$yunxiao-project 请读取 Work Item ID wi-controlled-123。"
         command = [
             "codex",
             "--ask-for-approval",

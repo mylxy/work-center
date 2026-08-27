@@ -55,8 +55,25 @@ def load_package(skill_dir: Path) -> tuple[str, dict[str, Any], dict[str, Any]]:
     )
 
 
+def mapping_node(
+    parent: dict[str, Any],
+    key: str,
+    errors: list[str],
+) -> dict[str, Any]:
+    value = parent.get(key)
+    if not isinstance(value, dict):
+        errors.append(f"{key} must be a mapping")
+        return {}
+    return value
+
+
 def validate_skill(skill_dir: Path) -> list[str]:
     errors: list[str] = []
+    if (
+        skill_dir.parent.name != "skills"
+        or skill_dir.parent.parent.name != ".agents"
+    ):
+        errors.append("skill must live under the repository .agents/skills directory")
     required_files = (
         skill_dir / "SKILL.md",
         skill_dir / "agents" / "openai.yaml",
@@ -84,12 +101,14 @@ def validate_skill(skill_dir: Path) -> list[str]:
     description = frontmatter.get("description")
     if not isinstance(description, str) or not description.strip():
         errors.append("frontmatter description must be non-empty")
+    elif "$yunxiao-project" not in description or "only" not in description.lower():
+        errors.append("frontmatter description must require explicit invocation")
     if frontmatter.get("disable-model-invocation") is not True:
         errors.append("disable-model-invocation must be true")
     if "[TODO:" in skill_text:
         errors.append("SKILL.md contains unresolved TODO markers")
 
-    interface = metadata.get("interface", {})
+    interface = mapping_node(metadata, "interface", errors)
     if interface.get("display_name") != "YunXiaoProject":
         errors.append("interface.display_name must be YunXiaoProject")
     short_description = interface.get("short_description", "")
@@ -98,12 +117,18 @@ def validate_skill(skill_dir: Path) -> list[str]:
         or not 25 <= len(short_description) <= 64
     ):
         errors.append("interface.short_description must contain 25-64 characters")
-    if "$yunxiao-project" not in interface.get("default_prompt", ""):
+    default_prompt = interface.get("default_prompt")
+    if (
+        not isinstance(default_prompt, str)
+        or "$yunxiao-project" not in default_prompt
+    ):
         errors.append("interface.default_prompt must show explicit invocation")
-    if metadata.get("policy", {}).get("allow_implicit_invocation") is not False:
+    policy = mapping_node(metadata, "policy", errors)
+    if policy.get("allow_implicit_invocation") is not False:
         errors.append("policy.allow_implicit_invocation must be false")
 
-    dependencies = metadata.get("dependencies", {}).get("tools", [])
+    dependency_config = mapping_node(metadata, "dependencies", errors)
+    dependencies = dependency_config.get("tools", [])
     expected_dependency = {
         "type": "mcp",
         "value": "yunxiao",
@@ -131,7 +156,7 @@ def main() -> int:
     skill_dir = (
         Path(sys.argv[1])
         if len(sys.argv) > 1
-        else Path("skills/yunxiao-project")
+        else Path(".agents/skills/yunxiao-project")
     )
     errors = validate_skill(skill_dir.resolve())
     if errors:

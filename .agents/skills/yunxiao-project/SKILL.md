@@ -1,6 +1,6 @@
 ---
 name: yunxiao-project
-description: Read one Yunxiao Work Item by its Work Item ID through the official hosted MCP.
+description: Use only when the user explicitly invokes $yunxiao-project; read one Yunxiao Work Item by its ID through the official hosted MCP.
 disable-model-invocation: true
 ---
 
