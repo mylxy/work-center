@@ -493,7 +493,7 @@ class MailctlCliTests(unittest.TestCase):
                         b'9 (INTERNALDATE "27-Aug-2026 09:00:00 +0800" '
                         b'BODYSTRUCTURE (("TEXT" "PLAIN" NIL NIL NIL "7BIT" 4 1) '
                         b'("IMAGE" "PNG" NIL NIL NIL "BASE64" 8 NIL '
-                        b'("ATTACHMENT" ("FILENAME" "chart.png")))) "RELATED" '
+                        b'("ATTACHMENT" NIL))) "RELATED" '
                         b'BODY[HEADER] {160}'
                     )
                     return "OK", [(metadata, header), (b" BODY[TEXT]<0> {4}", b"body")]

@@ -333,9 +333,11 @@ class ImapMailbox:
         except (TypeError, ValueError):
             received = ""
         addresses = lambda name: [addr for _, addr in getaddresses(message.get_all(name, [])) if addr]
-        content_type = str(message.get("Content-Type", "")).lower()
         bodystructure_has_attachment = bool(
-            re.search(r'(?i)"ATTACHMENT"\s*\(|"FILENAME"\s', metadata)
+            re.search(
+                r'(?i)"ATTACHMENT"\s+(?:\(|NIL)|"FILENAME"\s',
+                metadata,
+            )
         )
         return {
             "uid": uid,
@@ -346,8 +348,7 @@ class ImapMailbox:
             "cc": addresses("Cc"),
             "subject": str(message.get("Subject", "")),
             "snippet": text_bytes.decode("utf-8", "replace").strip()[:1024],
-            "has_attachments": bodystructure_has_attachment
-            or "multipart/mixed" in content_type,
+            "has_attachments": bodystructure_has_attachment,
         }
 
     def fetch(self, uid: int) -> bytes:
@@ -1145,7 +1146,7 @@ def command_send(args: argparse.Namespace) -> dict[str, object]:
     if state.get("status") != "pending":
         raise MailctlError(
             "draft-locked",
-            f"Prepared Draft is {state.get('status')}; create and preview a new draft",
+            f"Prepared Draft is {state.get('status')}; create and preview a new Prepared Draft",
         )
     try:
         expires_at = datetime.fromisoformat(str(state["expires_at"]))

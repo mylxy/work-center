@@ -22,6 +22,13 @@ class EmailSkillPackageTests(unittest.TestCase):
 
     def test_package_passes_executable_validator(self) -> None:
         self.assertEqual(validate_skill(SKILL), [])
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "tests" / "validate_email_skill.py"), str(SKILL)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
 
     def test_installer_creates_idempotent_authoritative_symlink(self) -> None:
         with tempfile.TemporaryDirectory(prefix="email-skill-install-") as directory:
