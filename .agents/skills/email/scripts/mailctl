@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if [ -x /opt/homebrew/bin/python3.12 ]; then
+    PYTHON=/opt/homebrew/bin/python3.12
+else
+    PYTHON=python3.12
+fi
+
+exec "$PYTHON" "$SCRIPT_DIR/mailctl.py" "$@"
