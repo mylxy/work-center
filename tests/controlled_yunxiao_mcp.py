@@ -73,6 +73,9 @@ STATUS_UPDATE_ERRORS = {
     "status-transport-uncertain": (
         "TRANSPORT_UNCERTAIN: connection dropped after request dispatch"
     ),
+    "status-transport-mismatch": (
+        "TRANSPORT_UNCERTAIN: connection dropped after request dispatch"
+    ),
 }
 ERROR_RESULTS = {
     "unauthenticated": {
@@ -125,6 +128,7 @@ def parse_args() -> argparse.Namespace:
             "status-permission-rejected",
             "status-required-field-rejected",
             "status-transport-uncertain",
+            "status-transport-mismatch",
             "status-verification-mismatch",
             "status-direct-success",
         ),
@@ -428,12 +432,17 @@ def tool_result(
             return error_result("INVALID_STATUS_ID")
         state["status_updated"] = True
         return success_result({"id": WORK_ITEM["id"], "statusId": "status-done"})
+    if name == "update_work_item" and scenario == "status-transport-mismatch":
+        state["status_updated"] = True
     if name == "update_work_item" and scenario in STATUS_UPDATE_ERRORS:
         return error_result(STATUS_UPDATE_ERRORS[scenario])
     if name in {"update_work_item", "create_work_item_comment"}:
         return error_result("WRITE_TRAP_CALLED")
     work_item = dict(WORK_ITEM)
-    if scenario == "status-verification-mismatch" and state.get("status_updated"):
+    if scenario in {
+        "status-verification-mismatch",
+        "status-transport-mismatch",
+    } and state.get("status_updated"):
         work_item["status"] = {"id": "status-done-alias", "name": "已完成"}
     elif scenario in {
         "status-direct-success",

@@ -79,7 +79,7 @@ metadata:
 - **缺少能力**：至少一个属于 `yunxiao` MCP 命名空间的基础工具已暴露，证明云效 MCP 已连接，但本次路径缺少所需能力时使用；不得把其他命名空间的工具当作连接证据。点名缺少的工具，要求检查 `project-management` toolset 或服务端能力；停止。
 - **配置不足**：点名缺少或无法唯一确定的 organization ID 或 project ID，并只请求该非敏感值。
 - **目标不唯一**：Work Item Number 搜索出现多个 `serialNumber` 精确匹配时，报告匹配数量并要求用户核对项目或提供 Work Item ID；不得选择目标。
-- **无权限**：返回云效的权限错误，并要求为当前 OAuth 身份授予目标 Work Item 的只读权限。
+- **无权限**：返回云效的权限错误。读取路径要求为当前 OAuth 身份授予目标 Work Item 的只读权限；Status 流转路径使用其 reference 中的更新权限指引。
 - **目标不存在或输入无效**：指出该 Work Item ID 未找到或不被接受，不搜索相似目标。
 
 只读路径不得触发副作用。Status 流转路径最多提交一次针对唯一 Work Item 的 Status 更新；任何路径都不得创建评论或修改其他字段。

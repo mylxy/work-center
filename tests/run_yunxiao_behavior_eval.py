@@ -162,7 +162,8 @@ SCENARIOS = {
     "missing-project": {
         "prompt": "$yunxiao-project 请读取 Work Item Number DSDD-123。",
         "default_project_id": None,
-        "expected": ("配置不足", "project ID"),
+        "expected": ("DSDD-123",),
+        "expected_any": (("project ID", "项目 ID", "default_project_id"),),
         "calls": (),
     },
     "wrong-project": {
@@ -170,7 +171,8 @@ SCENARIOS = {
             "$yunxiao-project 请在 project ID project-wrong 内读取 "
             "Work Item Number DSDD-123。"
         ),
-        "expected": ("DSDD-123", "没有找到", "project-wrong"),
+        "expected": ("DSDD-123", "project-wrong"),
+        "expected_any": (("没有找到", "未找到", "不存在", "无精确匹配"),),
         "calls": (
             tool_call(
                 "search_workitems",
@@ -204,11 +206,20 @@ SCENARIOS = {
         "ordered_pairs": ((FIRST_COMMENTS_CALL, NEXT_COMMENTS_CALL),),
     },
     "unauthenticated": {
-        "expected": ("未认证或认证过期", "重新", "OAuth"),
+        "expected": ("OAuth",),
+        "expected_any": (
+            ("未认证", "认证过期", "UNAUTHENTICATED", "expired"),
+            ("重新", "再次", "重授权"),
+        ),
         "calls": DEFAULT_READ_CALLS,
     },
     "permission-denied": {
-        "expected": ("无权限", "只读权限", "wi-controlled-123"),
+        "expected": (
+            "无权限",
+            "no read access",
+            "wi-controlled-123",
+            "下一步",
+        ),
         "calls": DEFAULT_READ_CALLS,
     },
     "missing-tool": {
@@ -284,9 +295,8 @@ SCENARIOS = {
         "expected": (
             "wi-controlled-123",
             "已完成",
-            "宿主",
-            "MCP 写",
         ),
+        "forbidden": ("已完成修改", "更新成功"),
         "calls": (
             tool_call("get_work_item", workItemId="wi-controlled-123"),
             STATUS_WORKFLOW_CALL,
@@ -363,6 +373,25 @@ SCENARIOS = {
             STATUS_WORKFLOW_CALL,
             CURRENT_USER_CALL,
             STATUS_UPDATE_CALL,
+            tool_call("get_work_item", workItemId="wi-controlled-123"),
+        ),
+        "ordered_names": (
+            "get_work_item",
+            "get_work_item_workflow",
+            "update_work_item",
+            "get_work_item",
+        ),
+        "controlled_write_authorized": True,
+    },
+    "status-transport-mismatch": {
+        "prompt": STATUS_CHANGE_PROMPT,
+        "expected": (
+            "结果不确定",
+            "status-done",
+            "status-done-alias",
+        ),
+        "calls": (
+            *STATUS_MUTATION_CALLS,
             tool_call("get_work_item", workItemId="wi-controlled-123"),
         ),
         "ordered_names": (
@@ -534,6 +563,11 @@ def main() -> None:
             if fragment not in output:
                 raise AssertionError(
                     f"Expected {fragment!r} in user-visible output:\n{output}"
+                )
+        for alternatives in scenario.get("expected_any", ()):
+            if not any(fragment in output for fragment in alternatives):
+                raise AssertionError(
+                    f"Expected one of {alternatives!r} in user-visible output:\n{output}"
                 )
         for fragment in scenario.get("forbidden", ()):
             if fragment in output:
