@@ -2,6 +2,7 @@
 import argparse
 import json
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 
@@ -9,34 +10,46 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 SKILL = ROOT / "skills" / "yunxiao-project"
 SERVER = Path(__file__).with_name("controlled_yunxiao_mcp.py")
+SCENARIO_EXPECTATIONS = {
+    "success": ("wi-controlled-123", "电池状态接口超时", "Bug", "处理中"),
+    "unauthenticated": ("未认证或认证过期", "重新", "OAuth"),
+    "permission-denied": ("无权限", "只读权限", "wi-controlled-123"),
+    "missing-tool": ("缺少能力", "get_work_item", "project-management", "检查"),
+    "unconfigured": ("MCP 未配置", "安装或启用", "中心版"),
+}
+NO_CALL_SCENARIOS = {"missing-tool", "unconfigured"}
+NO_MCP_SCENARIOS = {"unconfigured"}
+EXPLICIT_INVOCATION = re.compile(r"(?<![\w-])\$yunxiao-project(?![\w-])")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--scenario",
-        choices=(
-            "success",
-            "unauthenticated",
-            "permission-denied",
-            "missing-tool",
-            "unconfigured",
-        ),
+        choices=tuple(SCENARIO_EXPECTATIONS),
         default="success",
     )
     return parser.parse_args()
 
 
-def expected_output(scenario: str) -> tuple[str, ...]:
-    if scenario == "success":
-        return ("wi-controlled-123", "电池状态接口超时", "处理中")
-    if scenario == "unauthenticated":
-        return ("OAuth", "认证")
-    if scenario == "permission-denied":
-        return ("权限", "wi-controlled-123")
-    if scenario == "unconfigured":
-        return ("MCP 未配置", "中心版")
-    return ("缺少能力", "get_work_item", "project-management")
+def build_invocation_prompt(
+    user_prompt: str,
+    skill_text: str,
+    profile_text: str,
+) -> str:
+    """Model the host boundary: inject package context only for an explicit mention."""
+    if not EXPLICIT_INVOCATION.search(user_prompt):
+        return user_prompt
+    return f"""<skill>
+{skill_text}
+</skill>
+
+<profile>
+{profile_text}
+</profile>
+
+{user_prompt}
+"""
 
 
 def main() -> None:
@@ -51,18 +64,8 @@ def main() -> None:
         workspace = Path(directory)
         call_log = workspace / "calls.jsonl"
         final_output = workspace / "final.txt"
-        prompt = f"""The user explicitly selected the following skill. Follow it as the active skill for this request.
-
-<skill>
-{skill_text}
-</skill>
-
-<profile>
-{profile_text}
-</profile>
-
-$yunxiao-project 请读取 Work Item ID wi-controlled-123。
-"""
+        user_prompt = "$yunxiao-project 请读取 Work Item ID wi-controlled-123。"
+        prompt = build_invocation_prompt(user_prompt, skill_text, profile_text)
         command = [
             "codex",
             "--ask-for-approval",
@@ -78,7 +81,7 @@ $yunxiao-project 请读取 Work Item ID wi-controlled-123。
             "--output-last-message",
             str(final_output),
         ]
-        if args.scenario != "unconfigured":
+        if args.scenario not in NO_MCP_SCENARIOS:
             command.extend(
                 [
                     "-c",
@@ -112,7 +115,7 @@ $yunxiao-project 请读取 Work Item ID wi-controlled-123。
             )
 
         output = final_output.read_text()
-        for fragment in expected_output(args.scenario):
+        for fragment in SCENARIO_EXPECTATIONS[args.scenario]:
             if fragment not in output:
                 raise AssertionError(
                     f"Expected {fragment!r} in user-visible output:\n{output}"
@@ -122,7 +125,7 @@ $yunxiao-project 请读取 Work Item ID wi-controlled-123。
         if call_log.exists():
             calls = [json.loads(line) for line in call_log.read_text().splitlines()]
 
-        if args.scenario in ("missing-tool", "unconfigured"):
+        if args.scenario in NO_CALL_SCENARIOS:
             if calls:
                 raise AssertionError(f"Missing-tool scenario made calls: {calls}")
         else:

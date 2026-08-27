@@ -16,6 +16,29 @@ WORK_ITEM = {
     "assignedTo": {"name": "测试用户"},
     "description": "设备偶发无法读取最新电池状态。",
 }
+ERROR_RESULTS = {
+    "unauthenticated": {
+        "content": [
+            {
+                "type": "text",
+                "text": "UNAUTHENTICATED: OAuth session expired",
+            }
+        ],
+        "isError": True,
+    },
+    "permission-denied": {
+        "content": [
+            {
+                "type": "text",
+                "text": (
+                    "PERMISSION_DENIED: no read access to Work Item "
+                    "wi-controlled-123"
+                ),
+            }
+        ],
+        "isError": True,
+    },
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -77,26 +100,8 @@ def identity_tool_definition() -> dict:
 
 
 def tool_result(scenario: str) -> dict:
-    if scenario == "unauthenticated":
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": "UNAUTHENTICATED: OAuth session expired",
-                }
-            ],
-            "isError": True,
-        }
-    if scenario == "permission-denied":
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": "PERMISSION_DENIED: no read access to Work Item wi-controlled-123",
-                }
-            ],
-            "isError": True,
-        }
+    if scenario in ERROR_RESULTS:
+        return ERROR_RESULTS[scenario]
     return {
         "content": [
             {

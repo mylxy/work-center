@@ -1,36 +1,42 @@
-import json
 from pathlib import Path
 import re
-import subprocess
 import unittest
+
+from tests.run_yunxiao_behavior_eval import build_invocation_prompt
+from tests.validate_yunxiao_skill import (
+    CREDENTIAL_PATTERNS,
+    load_package,
+    load_yaml,
+    validate_skill,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILL = ROOT / "skills" / "yunxiao-project"
 
 
-def load_yaml(text: str) -> dict:
-    completed = subprocess.run(
-        [
-            "ruby",
-            "-ryaml",
-            "-rjson",
-            "-e",
-            "puts JSON.generate(YAML.safe_load(STDIN.read))",
-        ],
-        check=True,
-        capture_output=True,
-        input=text,
-        text=True,
-    )
-    return json.loads(completed.stdout)
-
-
 class YunxiaoProjectPackageTests(unittest.TestCase):
+    def test_host_adapter_injects_skill_only_for_explicit_invocation(self) -> None:
+        skill_text = "ACTIVE SKILL BODY"
+        profile_text = 'organization_id: "org-controlled"'
+
+        ordinary = build_invocation_prompt(
+            "读取 Work Item ID wi-controlled-123",
+            skill_text,
+            profile_text,
+        )
+        explicit = build_invocation_prompt(
+            "$yunxiao-project 读取 Work Item ID wi-controlled-123",
+            skill_text,
+            profile_text,
+        )
+
+        self.assertNotIn(skill_text, ordinary)
+        self.assertIn(skill_text, explicit)
+        self.assertIn("$yunxiao-project", explicit)
+
     def test_declares_explicit_only_hosted_mcp_dependency(self) -> None:
-        skill_text = (SKILL / "SKILL.md").read_text()
-        frontmatter = load_yaml(skill_text.split("---", 2)[1])
-        metadata = load_yaml((SKILL / "agents" / "openai.yaml").read_text())
+        _, frontmatter, metadata = load_package(SKILL)
 
         self.assertEqual(frontmatter["name"], "yunxiao-project")
         self.assertTrue(frontmatter["disable-model-invocation"])
@@ -65,25 +71,20 @@ class YunxiaoProjectPackageTests(unittest.TestCase):
             for path in sorted(SKILL.rglob("*"))
             if path.is_file()
         )
-        for credential_pattern in (
-            r"(?i)Bearer\s+[A-Za-z0-9._~-]+",
-            r"\bpt-[A-Za-z0-9_-]+",
-            r"\boat-[A-Za-z0-9_-]+",
-            r"\bort-[A-Za-z0-9_-]+",
-            r"(?i)(?:access|refresh|oauth|yunxiao)[_-]?token\s*:",
-        ):
+        for credential_pattern in CREDENTIAL_PATTERNS:
             self.assertIsNone(re.search(credential_pattern, package_text))
 
     def test_metadata_and_frontmatter_are_structurally_complete(self) -> None:
-        skill_text = (SKILL / "SKILL.md").read_text()
-        frontmatter = load_yaml(skill_text.split("---", 2)[1])
-        metadata = load_yaml((SKILL / "agents" / "openai.yaml").read_text())
+        skill_text, frontmatter, metadata = load_package(SKILL)
 
         self.assertEqual(SKILL.name, frontmatter["name"])
         self.assertNotIn("[TODO:", skill_text)
         self.assertIn("$yunxiao-project", metadata["interface"]["default_prompt"])
         self.assertGreaterEqual(len(metadata["interface"]["short_description"]), 25)
         self.assertLessEqual(len(metadata["interface"]["short_description"]), 64)
+
+    def test_package_passes_executable_validator(self) -> None:
+        self.assertEqual(validate_skill(SKILL), [])
 
 
 if __name__ == "__main__":
