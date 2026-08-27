@@ -25,11 +25,24 @@ REQUIRED_INSTRUCTIONS = (
     "不得重试发送",
 )
 AUTH_TERMINAL_INSTRUCTIONS = (
+    "不得索取、代填、保存或回显密码",
+    "可复用 PTY",
     "`open_in_codex`",
+    "同一个 `sessionId`",
     "`read_thread_terminal`",
-    "password data for new item:",
-    "会话失效",
     "完整绝对命令",
+    "password data for new item:",
+    "只有上述可见性检查通过后",
+    "`write_stdin`",
+    "保持当前轮次运行",
+    "credential-stored",
+    "会话失效",
+    "手动命令作为回退",
+    "空白 shell",
+)
+REQUIRED_INSTRUCTION_GROUPS = (
+    ("required instruction", REQUIRED_INSTRUCTIONS, False),
+    ("authentication terminal instruction", AUTH_TERMINAL_INSTRUCTIONS, True),
 )
 
 
@@ -87,14 +100,20 @@ def validate_skill(skill_dir: Path) -> list[str]:
     if "python3.12" not in launcher.read_text():
         errors.append("scripts/mailctl must require Python 3.12")
 
-    for instruction in REQUIRED_INSTRUCTIONS:
-        if instruction not in skill_text:
-            errors.append(f"SKILL.md is missing required instruction: {instruction}")
-    for instruction in AUTH_TERMINAL_INSTRUCTIONS:
-        if instruction not in skill_text:
-            errors.append(
-                f"SKILL.md is missing authentication terminal instruction: {instruction}"
-            )
+    for label, instructions, ordered in REQUIRED_INSTRUCTION_GROUPS:
+        positions: list[int] = []
+        for instruction in instructions:
+            position = skill_text.find(instruction)
+            if position < 0:
+                errors.append(f"SKILL.md is missing {label}: {instruction}")
+            else:
+                positions.append(position)
+        if (
+            ordered
+            and len(positions) == len(instructions)
+            and positions != sorted(positions)
+        ):
+            errors.append(f"SKILL.md {label}s must appear in workflow order")
 
     package_text = "\n".join(
         path.read_text(errors="replace")

@@ -32,7 +32,7 @@ metadata:
 
 1. 在 Calling Project 中以可复用 PTY 启动 `SKILL.md` 同目录下 `scripts/mailctl auth setup` 的绝对路径，并保持该会话运行。
 2. 立即用 `open_in_codex` 把返回的同一个 `sessionId` 显示在底部终端；随后调用 `read_thread_terminal`，确认用户可见输出同时包含完整绝对命令和 `password data for new item:`。
-3. 只有上述可见性检查通过后，才说明终端正在等待密码，并请用户直接在该终端输入。密码输入完成后再次读取终端；仅在看到 `credential-stored` 后继续运行 `doctor`。
+3. 只有上述可见性检查通过后，才说明终端正在等待密码，并请用户直接在该终端输入。随后用 `write_stdin` 空轮询同一 PTY，并保持当前轮次运行；仅在该会话输出 `credential-stored` 后继续运行 `doctor`。
 4. 若终端未附着到同一会话、看不到密码提示或会话失效，明确说明交互终端没有就绪，并把应在 Calling Project 手动运行的完整绝对命令展示给用户。此时以手动命令作为回退，不把空白 shell 描述成正在等待密码。
 
 若当前目录没有 `.mailctl/config.toml`，说明应在 Calling Project 中运行 `init`；不要替用户猜测邮箱地址。
