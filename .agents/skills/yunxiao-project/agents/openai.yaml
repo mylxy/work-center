@@ -1,0 +1,13 @@
+interface:
+  display_name: "YunXiaoProject"
+  short_description: "通过云效官方 MCP 精确读取 Work Item、流转 Status 或创建评论"
+  default_prompt: "使用 $yunxiao-project 读取 Work Item Number DSDD-123。"
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "yunxiao"
+      description: "阿里云官方托管的云效 MCP，仅启用项目管理工具集"
+      transport: "streamable_http"
+      url: "https://openapi-rdc.aliyuncs.com/ai/mcp?toolsets=project-management"
+policy:
+  allow_implicit_invocation: false

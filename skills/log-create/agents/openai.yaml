@@ -1,0 +1,6 @@
+interface:
+  display_name: "LogCreate"
+  short_description: "从 V3 模板创建、校验并软链接新的 SLS 日志查询技能"
+  default_prompt: "使用 $log-create 创建 LogExample，project=example-project logstore=example-logstore。"
+policy:
+  allow_implicit_invocation: false

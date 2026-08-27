@@ -1,0 +1,6 @@
+interface:
+  display_name: "LogProduce"
+  short_description: "按可选追踪标识查询并格式化展示生产管理系统日志"
+  default_prompt: "使用 $log-produce 查询最近三天的 ERROR 日志。"
+policy:
+  allow_implicit_invocation: false

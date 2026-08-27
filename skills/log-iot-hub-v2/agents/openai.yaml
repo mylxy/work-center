@@ -1,0 +1,6 @@
+interface:
+  display_name: "LogIotHubV2"
+  short_description: "按可选追踪标识查询并格式化展示 IoT Hub V2 生产日志"
+  default_prompt: "使用 $log-iot-hub-v2 查询最近三天的 ERROR 日志。"
+policy:
+  allow_implicit_invocation: false
