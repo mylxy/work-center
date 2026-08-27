@@ -139,7 +139,7 @@ SCENARIOS = {
             "$yunxiao-project 请在 project ID project-wrong 内读取 "
             "Work Item Number DSDD-123。"
         ),
-        "expected": ("DSDD-123", "精确匹配", "project-wrong"),
+        "expected": ("DSDD-123", "没有找到", "project-wrong", "OTHER-123"),
         "calls": (
             tool_call(
                 "search_workitems",
