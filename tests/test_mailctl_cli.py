@@ -409,6 +409,136 @@ class MailctlCliTests(unittest.TestCase):
             self.assertEqual([item["uid"] for item in second_page["items"]], [1])
             self.assertIsNone(second_page["next_cursor"])
 
+    def test_search_associates_header_and_text_literals_by_fetch_descriptor(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="mailctl-project-") as directory:
+            project = Path(directory)
+            initialized = run_mailctl(project, "init", "--email", "owner@example.com")
+            self.assertEqual(initialized.returncode, 0, initialized.stderr)
+            module = load_mailctl_module()
+            header = (
+                b"From: Alice <alice@example.com>\r\n"
+                b"To: Owner <owner@example.com>\r\n"
+                b"Cc: Reviewer <reviewer@example.com>\r\n"
+                b"Subject: Weekly update\r\n"
+                b"Message-ID: <weekly-73@example.com>\r\n\r\n"
+            )
+
+            class AlibabaLikeImap(SearchImapStub):
+                def uid(self, *query):
+                    if query[0] == "SEARCH":
+                        return "OK", [b"73"]
+                    return "OK", [
+                        (
+                            b'73 (INTERNALDATE "27-Aug-2026 09:00:00 +0800" '
+                            b'BODYSTRUCTURE (("TEXT" "PLAIN" NIL NIL NIL "7BIT" 23 1) '
+                            b'("APPLICATION" "PDF" ("NAME" {22}',
+                            b"weekly-report-2026.pdf",
+                        ),
+                        (
+                            b') NIL NIL "BASE64" 128 NIL ("ATTACHMENT" '
+                            b'("FILENAME" "weekly-report-2026.pdf"))) "MIXED") '
+                            b'BODY[HEADER] {164}',
+                            header,
+                        ),
+                        (b" BODY[TEXT]<0> {23}", b"Actual message preview."),
+                        b")",
+                    ]
+
+            exit_code, result = run_search_with_imap(
+                project,
+                module,
+                AlibabaLikeImap,
+                "--from",
+                "alice@example.com",
+            )
+
+            self.assertEqual(exit_code, 0, result)
+            self.assertEqual(len(result["items"]), 1, result)
+            item = result["items"][0]
+            self.assertEqual(item["from"], ["alice@example.com"])
+            self.assertEqual(item["to"], ["owner@example.com"])
+            self.assertEqual(item["cc"], ["reviewer@example.com"])
+            self.assertEqual(item["subject"], "Weekly update")
+            self.assertEqual(item["message_id"], "<weekly-73@example.com>")
+            self.assertEqual(item["snippet"], "Actual message preview.")
+            self.assertTrue(item["has_attachments"])
+
+    def test_search_rejects_fetch_response_without_text_descriptor(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="mailctl-project-") as directory:
+            project = Path(directory)
+            initialized = run_mailctl(project, "init", "--email", "owner@example.com")
+            self.assertEqual(initialized.returncode, 0, initialized.stderr)
+            module = load_mailctl_module()
+            header = (
+                b"From: Alice <alice@example.com>\r\n"
+                b"To: owner@example.com\r\n"
+                b"Subject: Weekly update\r\n\r\n"
+            )
+
+            class MissingTextImap(SearchImapStub):
+                def uid(self, *query):
+                    if query[0] == "SEARCH":
+                        return "OK", [b"73"]
+                    return "OK", [
+                        (
+                            b'73 (INTERNALDATE "27-Aug-2026 09:00:00 +0800" '
+                            b'BODYSTRUCTURE ("TEXT" "PLAIN") BODY[HEADER] {82}',
+                            header,
+                        ),
+                        b")",
+                    ]
+
+            exit_code, result = run_search_with_imap(
+                project,
+                module,
+                MissingTextImap,
+            )
+
+            self.assertEqual(exit_code, 2, result)
+            self.assertEqual(result["category"], "connection")
+            self.assertEqual(
+                result["message"],
+                "IMAP response missing BODY[TEXT] for UID 73",
+            )
+
+    def test_search_rejects_duplicate_header_descriptors(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="mailctl-project-") as directory:
+            project = Path(directory)
+            initialized = run_mailctl(project, "init", "--email", "owner@example.com")
+            self.assertEqual(initialized.returncode, 0, initialized.stderr)
+            module = load_mailctl_module()
+
+            class DuplicateHeaderImap(SearchImapStub):
+                def uid(self, *query):
+                    if query[0] == "SEARCH":
+                        return "OK", [b"73"]
+                    return "OK", [
+                        (
+                            b'73 (INTERNALDATE "27-Aug-2026 09:00:00 +0800" '
+                            b'BODYSTRUCTURE ("TEXT" "PLAIN") BODY[HEADER] {43}',
+                            b"From: alice@example.com\r\nSubject: First\r\n\r\n",
+                        ),
+                        (
+                            b" BODY[HEADER] {46}",
+                            b"From: someone@example.com\r\nSubject: Second\r\n\r\n",
+                        ),
+                        (b" BODY[TEXT]<0> {4}", b"body"),
+                        b")",
+                    ]
+
+            exit_code, result = run_search_with_imap(
+                project,
+                module,
+                DuplicateHeaderImap,
+            )
+
+            self.assertEqual(exit_code, 2, result)
+            self.assertEqual(result["category"], "connection")
+            self.assertEqual(
+                result["message"],
+                "IMAP response repeated BODY[HEADER] for UID 73",
+            )
+
     def test_search_reports_server_rejection_as_capability_error(self) -> None:
         with tempfile.TemporaryDirectory(prefix="mailctl-project-") as directory:
             project = Path(directory)
