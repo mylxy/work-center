@@ -97,6 +97,27 @@ STATUS_UPDATE_CALL = tool_call(
     workItemId="wi-controlled-123",
     statusId="status-done",
 )
+STATUS_CHANGE_PROMPT = (
+    "$yunxiao-project 请直接修改 Work Item ID wi-controlled-123 的 "
+    "Status 为“已完成”。"
+)
+STATUS_MUTATION_CALLS = (
+    tool_call("get_work_item", workItemId="wi-controlled-123"),
+    STATUS_WORKFLOW_CALL,
+    CURRENT_USER_CALL,
+    STATUS_UPDATE_CALL,
+)
+
+
+def status_rejection_scenario(*expected: str) -> dict:
+    return {
+        "prompt": STATUS_CHANGE_PROMPT,
+        "expected": expected,
+        "calls": STATUS_MUTATION_CALLS,
+        "controlled_write_authorized": True,
+    }
+
+
 SCENARIOS = {
     "success": {
         "expected": COMPACT_EXPECTATIONS,
@@ -263,7 +284,8 @@ SCENARIOS = {
         "expected": (
             "wi-controlled-123",
             "已完成",
-            "user cancelled MCP tool call",
+            "宿主",
+            "MCP 写",
         ),
         "calls": (
             tool_call("get_work_item", workItemId="wi-controlled-123"),
@@ -274,67 +296,32 @@ SCENARIOS = {
             tool_call("get_work_item", workItemId="wi-controlled-123"),
         ),
     },
-    "status-workflow-rejected": {
-        "prompt": (
-            "$yunxiao-project 请直接修改 Work Item ID wi-controlled-123 的 "
-            "Status 为“已完成”。"
-        ),
-        "expected": (
-            "工作流限制",
-            "status-processing",
-            "status-done",
-            "not allowed",
-        ),
-        "calls": (
-            tool_call("get_work_item", workItemId="wi-controlled-123"),
-            STATUS_WORKFLOW_CALL,
-            CURRENT_USER_CALL,
-            STATUS_UPDATE_CALL,
-        ),
-        "controlled_write_authorized": True,
-    },
-    "status-role-rejected": {
-        "prompt": (
-            "$yunxiao-project 请直接修改 Work Item ID wi-controlled-123 的 "
-            "Status 为“已完成”。"
-        ),
-        "expected": ("角色限制", "Resolver role is required"),
-        "calls": (
-            tool_call("get_work_item", workItemId="wi-controlled-123"),
-            STATUS_WORKFLOW_CALL,
-            CURRENT_USER_CALL,
-            STATUS_UPDATE_CALL,
-        ),
-        "controlled_write_authorized": True,
-    },
-    "status-permission-rejected": {
-        "prompt": (
-            "$yunxiao-project 请直接修改 Work Item ID wi-controlled-123 的 "
-            "Status 为“已完成”。"
-        ),
-        "expected": ("无权限", "no update access"),
-        "calls": (
-            tool_call("get_work_item", workItemId="wi-controlled-123"),
-            STATUS_WORKFLOW_CALL,
-            CURRENT_USER_CALL,
-            STATUS_UPDATE_CALL,
-        ),
-        "controlled_write_authorized": True,
-    },
-    "status-required-field-rejected": {
-        "prompt": (
-            "$yunxiao-project 请直接修改 Work Item ID wi-controlled-123 的 "
-            "Status 为“已完成”。"
-        ),
-        "expected": ("必填字段卡点", "resolution must be set"),
-        "calls": (
-            tool_call("get_work_item", workItemId="wi-controlled-123"),
-            STATUS_WORKFLOW_CALL,
-            CURRENT_USER_CALL,
-            STATUS_UPDATE_CALL,
-        ),
-        "controlled_write_authorized": True,
-    },
+    "status-workflow-rejected": status_rejection_scenario(
+        "工作流限制",
+        "status-processing",
+        "status-done",
+        "not allowed",
+        "下一步",
+        "中间",
+    ),
+    "status-role-rejected": status_rejection_scenario(
+        "角色限制",
+        "Resolver role is required",
+        "下一步",
+        "授予",
+    ),
+    "status-permission-rejected": status_rejection_scenario(
+        "无权限",
+        "no update access",
+        "下一步",
+        "更新权限",
+    ),
+    "status-required-field-rejected": status_rejection_scenario(
+        "必填字段卡点",
+        "resolution must be set",
+        "下一步",
+        "补齐",
+    ),
     "status-transport-uncertain": {
         "prompt": (
             "$yunxiao-project 请直接修改 Work Item ID wi-controlled-123 的 "
@@ -345,6 +332,31 @@ SCENARIOS = {
             "TRANSPORT_UNCERTAIN",
             "处理中",
             "没有重试",
+        ),
+        "calls": (
+            tool_call("get_work_item", workItemId="wi-controlled-123"),
+            STATUS_WORKFLOW_CALL,
+            CURRENT_USER_CALL,
+            STATUS_UPDATE_CALL,
+            tool_call("get_work_item", workItemId="wi-controlled-123"),
+        ),
+        "ordered_names": (
+            "get_work_item",
+            "get_work_item_workflow",
+            "update_work_item",
+            "get_work_item",
+        ),
+        "controlled_write_authorized": True,
+    },
+    "status-verification-mismatch": {
+        "prompt": (
+            "$yunxiao-project 请直接修改 Work Item ID wi-controlled-123 的 "
+            "Status 为“已完成”。"
+        ),
+        "expected": (
+            "结果不确定",
+            "status-done",
+            "status-done-alias",
         ),
         "calls": (
             tool_call("get_work_item", workItemId="wi-controlled-123"),

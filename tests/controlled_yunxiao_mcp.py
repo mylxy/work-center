@@ -58,6 +58,22 @@ CURRENT_USER = {
     "name": "执行用户",
     "organizationId": "org-controlled",
 }
+STATUS_UPDATE_ERRORS = {
+    "status-workflow-rejected": (
+        "WORKFLOW_RESTRICTION: transition from status-processing "
+        "to status-done is not allowed"
+    ),
+    "status-role-rejected": "ROLE_RESTRICTION: Resolver role is required",
+    "status-permission-rejected": (
+        "PERMISSION_DENIED: no update access to this Work Item"
+    ),
+    "status-required-field-rejected": (
+        "REQUIRED_FIELD: resolution must be set before this transition"
+    ),
+    "status-transport-uncertain": (
+        "TRANSPORT_UNCERTAIN: connection dropped after request dispatch"
+    ),
+}
 ERROR_RESULTS = {
     "unauthenticated": {
         "content": [
@@ -109,6 +125,7 @@ def parse_args() -> argparse.Namespace:
             "status-permission-rejected",
             "status-required-field-rejected",
             "status-transport-uncertain",
+            "status-verification-mismatch",
             "status-direct-success",
         ),
         default="success",
@@ -318,6 +335,13 @@ def success_result(data: dict) -> dict:
     }
 
 
+def error_result(message: str) -> dict:
+    return {
+        "content": [{"type": "text", "text": message}],
+        "isError": True,
+    }
+
+
 def search_results(scenario: str) -> list[dict]:
     if scenario in {"wrong-project", "zero-match"}:
         return [
@@ -398,76 +422,20 @@ def tool_result(
     if name == "update_work_item" and scenario in {
         "status-direct-success",
         "status-host-approval-required",
+        "status-verification-mismatch",
     }:
         if arguments.get("statusId") != "status-done":
-            return {
-                "content": [{"type": "text", "text": "INVALID_STATUS_ID"}],
-                "isError": True,
-            }
+            return error_result("INVALID_STATUS_ID")
         state["status_updated"] = True
         return success_result({"id": WORK_ITEM["id"], "statusId": "status-done"})
-    if name == "update_work_item" and scenario == "status-workflow-rejected":
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": (
-                        "WORKFLOW_RESTRICTION: transition from status-processing "
-                        "to status-done is not allowed"
-                    ),
-                }
-            ],
-            "isError": True,
-        }
-    if name == "update_work_item" and scenario == "status-role-rejected":
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": "ROLE_RESTRICTION: Resolver role is required",
-                }
-            ],
-            "isError": True,
-        }
-    if name == "update_work_item" and scenario == "status-permission-rejected":
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": "PERMISSION_DENIED: no update access to this Work Item",
-                }
-            ],
-            "isError": True,
-        }
-    if name == "update_work_item" and scenario == "status-required-field-rejected":
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": "REQUIRED_FIELD: resolution must be set before this transition",
-                }
-            ],
-            "isError": True,
-        }
-    if name == "update_work_item" and scenario == "status-transport-uncertain":
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": (
-                        "TRANSPORT_UNCERTAIN: connection dropped after request dispatch"
-                    ),
-                }
-            ],
-            "isError": True,
-        }
+    if name == "update_work_item" and scenario in STATUS_UPDATE_ERRORS:
+        return error_result(STATUS_UPDATE_ERRORS[scenario])
     if name in {"update_work_item", "create_work_item_comment"}:
-        return {
-            "content": [{"type": "text", "text": "WRITE_TRAP_CALLED"}],
-            "isError": True,
-        }
+        return error_result("WRITE_TRAP_CALLED")
     work_item = dict(WORK_ITEM)
-    if scenario in {
+    if scenario == "status-verification-mismatch" and state.get("status_updated"):
+        work_item["status"] = {"id": "status-done-alias", "name": "已完成"}
+    elif scenario in {
         "status-direct-success",
         "status-host-approval-required",
     } and state.get("status_updated"):
