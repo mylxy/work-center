@@ -73,6 +73,7 @@ DEFAULT_READ_CALLS = (
     tool_call("get_work_item", workItemId="wi-controlled-123"),
     tool_call("list_work_item_comments", workItemId="wi-controlled-123"),
 )
+EXACT_COMMENT = "请保持发布窗口开放，直到回归测试全部通过。"
 NUMBER_SEARCH_CALL = tool_call(
     "search_workitems",
     projectId="project-controlled",
@@ -92,6 +93,222 @@ SCENARIOS = {
         "expected": COMPACT_EXPECTATIONS,
         "forbidden": COMPACT_FORBIDDEN,
         "calls": DEFAULT_READ_CALLS,
+    },
+    "exact-comment": {
+        "prompt": (
+            "$yunxiao-project 请对 Work Item ID wi-controlled-123 直接评论，"
+            f"评论原文如下：{EXACT_COMMENT}"
+        ),
+        "expected": (EXACT_COMMENT, "comment-created-1", "受控执行用户"),
+        "calls": (
+            *DEFAULT_READ_CALLS,
+            tool_call(
+                "create_work_item_comment",
+                workItemId="wi-controlled-123",
+                content=EXACT_COMMENT,
+            ),
+            tool_call("list_work_item_comments", workItemId="wi-controlled-123"),
+        ),
+        "comment_write_sequence": True,
+        "allow_controlled_write": True,
+    },
+    "intent-preview": {
+        "prompt": (
+            "$yunxiao-project 请为 Work Item ID wi-controlled-123 添加评论。"
+            "评论意图：告知团队修复已合入 3.2.2，请回归电池状态接口并反馈结果。"
+        ),
+        "expected": (
+            "wi-controlled-123",
+            "DSDD-123",
+            "评论草稿",
+            "3.2.2",
+            "电池状态接口",
+            "反馈",
+            "确认",
+        ),
+        "calls": (
+            tool_call("get_work_item", workItemId="wi-controlled-123"),
+        ),
+    },
+    "comment-transport-uncertain": {
+        "prompt": (
+            "$yunxiao-project 请对 Work Item ID wi-controlled-123 直接评论，"
+            f"评论原文如下：{EXACT_COMMENT}"
+        ),
+        "expected": (
+            "结果不确定",
+            "connection closed",
+            "不会自动",
+            EXACT_COMMENT,
+        ),
+        "calls": (
+            *DEFAULT_READ_CALLS,
+            tool_call(
+                "create_work_item_comment",
+                workItemId="wi-controlled-123",
+                content=EXACT_COMMENT,
+            ),
+            tool_call("list_work_item_comments", workItemId="wi-controlled-123"),
+        ),
+        "comment_write_sequence": True,
+        "allow_controlled_write": True,
+    },
+    "comment-transport-preexisting": {
+        "prompt": (
+            "$yunxiao-project 请对 Work Item ID wi-controlled-123 直接评论，"
+            f"评论原文如下：{EXACT_COMMENT}"
+        ),
+        "expected": (
+            "结果不确定",
+            "comment-preexisting",
+            "不会自动",
+        ),
+        "calls": (
+            *DEFAULT_READ_CALLS,
+            tool_call(
+                "create_work_item_comment",
+                workItemId="wi-controlled-123",
+                content=EXACT_COMMENT,
+            ),
+            tool_call("list_work_item_comments", workItemId="wi-controlled-123"),
+        ),
+        "comment_write_sequence": True,
+        "allow_controlled_write": True,
+    },
+    "comment-business-error": {
+        "prompt": (
+            "$yunxiao-project 请对 Work Item ID wi-controlled-123 直接评论，"
+            f"评论原文如下：{EXACT_COMMENT}"
+        ),
+        "expected": (
+            "业务规则拒绝",
+            "INVALID_ARGUMENT",
+            "project text policy",
+            "需要",
+        ),
+        "calls": (
+            *DEFAULT_READ_CALLS,
+            tool_call(
+                "create_work_item_comment",
+                workItemId="wi-controlled-123",
+                content=EXACT_COMMENT,
+            ),
+        ),
+        "comment_write_sequence": True,
+        "allow_controlled_write": True,
+    },
+    "comment-permission-denied": {
+        "prompt": (
+            "$yunxiao-project 请对 Work Item ID wi-controlled-123 直接评论，"
+            f"评论原文如下：{EXACT_COMMENT}"
+        ),
+        "expected": ("无权限", "PERMISSION_DENIED", "当前 OAuth", "评论"),
+        "calls": (
+            *DEFAULT_READ_CALLS,
+            tool_call(
+                "create_work_item_comment",
+                workItemId="wi-controlled-123",
+                content=EXACT_COMMENT,
+            ),
+        ),
+        "comment_write_sequence": True,
+        "allow_controlled_write": True,
+    },
+    "comment-unauthenticated": {
+        "prompt": (
+            "$yunxiao-project 请对 Work Item ID wi-controlled-123 直接评论，"
+            f"评论原文如下：{EXACT_COMMENT}"
+        ),
+        "expected": ("未认证或认证过期", "重新", "OAuth"),
+        "calls": (
+            *DEFAULT_READ_CALLS,
+            tool_call(
+                "create_work_item_comment",
+                workItemId="wi-controlled-123",
+                content=EXACT_COMMENT,
+            ),
+        ),
+        "comment_write_sequence": True,
+        "allow_controlled_write": True,
+    },
+    "comment-missing-tool": {
+        "prompt": (
+            "$yunxiao-project 请对 Work Item ID wi-controlled-123 直接评论，"
+            f"评论原文如下：{EXACT_COMMENT}"
+        ),
+        "expected": (
+            "缺少能力",
+            "create_work_item_comment",
+            "project-management",
+        ),
+        "calls": (),
+    },
+    "comment-approval-required": {
+        "prompt": (
+            "$yunxiao-project 请对 Work Item ID wi-controlled-123 直接评论，"
+            f"评论原文如下：{EXACT_COMMENT}"
+        ),
+        "expected": ("写入未获批准", "MCP 写工具审批", "create_work_item_comment"),
+        "calls": DEFAULT_READ_CALLS,
+    },
+    "direct-intent-comment": {
+        "prompt": (
+            "$yunxiao-project 请对 Work Item ID wi-controlled-123 直接评论。"
+            "评论意图：告知团队修复已合入 3.2.2，请回归电池状态接口并反馈结果。"
+        ),
+        "expected": (
+            "comment-created-1",
+            "受控执行用户",
+            "3.2.2",
+            "电池状态接口",
+            "反馈",
+        ),
+        "expected_call_names": (
+            "get_work_item",
+            "list_work_item_comments",
+            "create_work_item_comment",
+            "list_work_item_comments",
+        ),
+        "comment_content_fragments": ("3.2.2", "电池状态接口", "反馈"),
+        "allow_controlled_write": True,
+    },
+    "top-level-only": {
+        "prompt": (
+            "$yunxiao-project 请回复 Work Item ID wi-controlled-123 的评论 "
+            "comment-2，回复原文：已收到。"
+        ),
+        "expected": ("第一版", "顶层评论", "不支持", "回复"),
+        "calls": (),
+    },
+    "multiple-comment-targets": {
+        "prompt": (
+            "$yunxiao-project 请对 Work Item ID wi-controlled-123 和 "
+            "wi-controlled-456 直接评论，评论原文：统一回归。"
+        ),
+        "expected": ("单个", "两个目标", "没有调用写入"),
+        "calls": (),
+    },
+    "comment-transport-confirmed": {
+        "prompt": (
+            "$yunxiao-project 请对 Work Item ID wi-controlled-123 直接评论，"
+            f"评论原文如下：{EXACT_COMMENT}"
+        ),
+        "expected": (
+            "comment-created-1",
+            "受控执行用户",
+            EXACT_COMMENT,
+        ),
+        "calls": (
+            *DEFAULT_READ_CALLS,
+            tool_call(
+                "create_work_item_comment",
+                workItemId="wi-controlled-123",
+                content=EXACT_COMMENT,
+            ),
+            tool_call("list_work_item_comments", workItemId="wi-controlled-123"),
+        ),
+        "comment_write_sequence": True,
+        "allow_controlled_write": True,
     },
     "number-compact": {
         "prompt": "$yunxiao-project 请读取 Work Item Number DSDD-123。",
@@ -217,6 +434,51 @@ def assert_calls(
             raise AssertionError(f"MCP calls occurred out of dependency order: {observed}")
 
 
+def assert_generated_comment_calls(
+    observed: list[dict],
+    expected_names: tuple[str, ...],
+    content_fragments: tuple[str, ...],
+) -> None:
+    names = tuple(call["name"] for call in observed)
+    if len(names) != 4:
+        raise AssertionError(f"Unexpected MCP call count: {observed}")
+    if Counter(names[:2]) != Counter(expected_names[:2]):
+        raise AssertionError(f"Missing pre-write reads: {observed}")
+    if names[2:] != expected_names[2:]:
+        raise AssertionError(f"Unexpected MCP call order: {observed}")
+    create_call = next(
+        call for call in observed if call["name"] == "create_work_item_comment"
+    )
+    arguments = create_call["arguments"]
+    if set(arguments) != {"organizationId", "workItemId", "content"}:
+        raise AssertionError(f"Unexpected comment arguments: {arguments}")
+    if arguments["organizationId"] != "org-controlled":
+        raise AssertionError(f"Unexpected organization: {arguments}")
+    if arguments["workItemId"] != "wi-controlled-123":
+        raise AssertionError(f"Unexpected Work Item: {arguments}")
+    for fragment in content_fragments:
+        if fragment not in arguments["content"]:
+            raise AssertionError(
+                f"Expected {fragment!r} in generated comment: {arguments['content']!r}"
+            )
+
+
+def assert_comment_write_sequence(observed: list[dict]) -> None:
+    names = [call["name"] for call in observed]
+    if "create_work_item_comment" not in names:
+        raise AssertionError(f"Comment creation was not attempted: {observed}")
+    create_index = names.index("create_work_item_comment")
+    if Counter(names[:create_index]) != Counter(
+        ("get_work_item", "list_work_item_comments")
+    ):
+        raise AssertionError(f"Missing pre-write reads: {observed}")
+    if names.count("create_work_item_comment") != 1:
+        raise AssertionError(f"Comment creation was retried: {observed}")
+    if names.count("list_work_item_comments") == 2:
+        if names[-1] != "list_work_item_comments":
+            raise AssertionError(f"Post-write verification was not last: {observed}")
+
+
 def main() -> None:
     args = parse_args()
     scenario = SCENARIOS[args.scenario]
@@ -235,21 +497,25 @@ def main() -> None:
         (installed_skill / "profile.yaml").write_text(profile_text)
         subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
 
-        command = [
-            "codex",
-            "--ask-for-approval",
-            "never",
-            "exec",
-            "--model",
-            "gpt-5.5",
-            "--ephemeral",
-            "--ignore-user-config",
-            "--skip-git-repo-check",
-            "--sandbox",
-            "read-only",
-            "--output-last-message",
-            str(final_output),
-        ]
+        command = ["codex"]
+        if not scenario.get("allow_controlled_write"):
+            command.extend(["--ask-for-approval", "never"])
+        command.extend(
+            [
+                "exec",
+                "--model",
+                "gpt-5.5",
+                "--ephemeral",
+                "--ignore-user-config",
+                "--skip-git-repo-check",
+                "--sandbox",
+                "read-only",
+                "--output-last-message",
+                str(final_output),
+            ]
+        )
+        if scenario.get("allow_controlled_write"):
+            command.append("--dangerously-bypass-approvals-and-sandbox")
         if scenario.get("configure_mcp", True):
             command.extend(
                 [
@@ -302,12 +568,21 @@ def main() -> None:
             {"name": call.get("name"), "arguments": call.get("arguments")}
             for call in calls
         ]
-        assert_calls(
-            observed_calls,
-            scenario["calls"],
-            scenario.get("ordered_prefix", 0),
-            scenario.get("ordered_pairs", ()),
-        )
+        if "expected_call_names" in scenario:
+            assert_generated_comment_calls(
+                observed_calls,
+                scenario["expected_call_names"],
+                scenario["comment_content_fragments"],
+            )
+        else:
+            assert_calls(
+                observed_calls,
+                scenario["calls"],
+                scenario.get("ordered_prefix", 0),
+                scenario.get("ordered_pairs", ()),
+            )
+            if scenario.get("comment_write_sequence"):
+                assert_comment_write_sequence(observed_calls)
         print(output)
 
 
