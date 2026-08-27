@@ -12,7 +12,7 @@ from typing import Any
 HOSTED_ENDPOINT = (
     "https://openapi-rdc.aliyuncs.com/ai/mcp?toolsets=project-management"
 )
-ALLOWED_FRONTMATTER = {"name", "description", "disable-model-invocation"}
+ALLOWED_FRONTMATTER = {"name", "description", "metadata"}
 CREDENTIAL_PATTERNS = (
     r"(?i)Bearer\s+[A-Za-z0-9._~-]+",
     r"\bpt-[A-Za-z0-9_-]+",
@@ -75,11 +75,8 @@ def mapping_node(
 
 def validate_skill(skill_dir: Path) -> list[str]:
     errors: list[str] = []
-    if (
-        skill_dir.parent.name != "skills"
-        or skill_dir.parent.parent.name != ".agents"
-    ):
-        errors.append("skill must live under the repository .agents/skills directory")
+    if skill_dir.parent.name != "skills":
+        errors.append("skill must live under a skills directory")
     required_files = (
         skill_dir / "SKILL.md",
         skill_dir / "agents" / "openai.yaml",
@@ -110,8 +107,9 @@ def validate_skill(skill_dir: Path) -> list[str]:
         errors.append("frontmatter description must be non-empty")
     elif "$yunxiao-project" not in description or "only" not in description.lower():
         errors.append("frontmatter description must require explicit invocation")
-    if frontmatter.get("disable-model-invocation") is not True:
-        errors.append("disable-model-invocation must be true")
+    frontmatter_metadata = mapping_node(frontmatter, "metadata", errors)
+    if frontmatter_metadata.get("disable-model-invocation") is not True:
+        errors.append("metadata.disable-model-invocation must be true")
     interface = mapping_node(metadata, "interface", errors)
     if interface.get("display_name") != "YunXiaoProject":
         errors.append("interface.display_name must be YunXiaoProject")
@@ -171,7 +169,7 @@ def main() -> int:
     skill_dir = (
         Path(sys.argv[1])
         if len(sys.argv) > 1
-        else Path(".agents/skills/yunxiao-project")
+        else Path("skills/yunxiao-project")
     )
     errors = validate_skill(skill_dir.resolve())
     if errors:

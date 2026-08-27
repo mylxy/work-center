@@ -388,7 +388,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Validate YunXiaoProject using read-only live MCP calls."
     )
-    parser.add_argument("--source", type=Path, default=root / ".agents/skills/yunxiao-project")
+    parser.add_argument("--source", type=Path, default=root / "skills/yunxiao-project")
     parser.add_argument("--skill-root", type=Path, default=Path.home() / ".agents/skills")
     parser.add_argument("--config", type=Path, default=Path.home() / ".codex/config.toml")
     parser.add_argument("--codex", type=Path, default=Path("codex"))

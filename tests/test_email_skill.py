@@ -8,7 +8,7 @@ from tests.validate_email_skill import validate_skill
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SKILL = ROOT / ".agents" / "skills" / "email"
+SKILL = ROOT / "skills" / "email"
 INSTALLER = ROOT / "scripts" / "install_email_skill.py"
 
 

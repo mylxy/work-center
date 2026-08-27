@@ -9,7 +9,7 @@ import sys
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-SOURCE = REPOSITORY_ROOT / ".agents" / "skills" / "email"
+SOURCE = REPOSITORY_ROOT / "skills" / "email"
 DEFAULT_TARGET = Path.home() / ".codex" / "skills" / "email"
 
 

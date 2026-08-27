@@ -14,7 +14,7 @@ from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MAILCTL = ROOT / ".agents" / "skills" / "email" / "scripts" / "mailctl"
+MAILCTL = ROOT / "skills" / "email" / "scripts" / "mailctl"
 MAILCTL_MODULE_PATH = MAILCTL.with_suffix(".py")
 
 
