@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 
 
+EXACT_COMMENT = "  Release ABC-42\n请保持发布窗口开放，直到回归测试全部通过。\nEND  "
 WORK_ITEM = {
     "id": "wi-controlled-123",
     "serialNumber": "DSDD-123",
@@ -46,28 +47,20 @@ ACTIVITIES = [
         "createdAt": "2026-08-25T09:00:00Z",
     },
 ]
+
+
+def error_result(message: str) -> dict:
+    return {
+        "content": [{"type": "text", "text": message}],
+        "isError": True,
+    }
+
+
 ERROR_RESULTS = {
-    "unauthenticated": {
-        "content": [
-            {
-                "type": "text",
-                "text": "UNAUTHENTICATED: OAuth session expired",
-            }
-        ],
-        "isError": True,
-    },
-    "permission-denied": {
-        "content": [
-            {
-                "type": "text",
-                "text": (
-                    "PERMISSION_DENIED: no read access to Work Item "
-                    "wi-controlled-123"
-                ),
-            }
-        ],
-        "isError": True,
-    },
+    "unauthenticated": error_result("UNAUTHENTICATED: OAuth session expired"),
+    "permission-denied": error_result(
+        "PERMISSION_DENIED: no read access to Work Item wi-controlled-123"
+    ),
 }
 
 
@@ -90,6 +83,7 @@ def parse_args() -> argparse.Namespace:
             "comment-approval-required",
             "direct-intent-comment",
             "top-level-only",
+            "existing-comment-mutations",
             "multiple-comment-targets",
             "number-compact",
             "url-compact",
@@ -339,54 +333,22 @@ def tool_result(
         "comment-transport-uncertain",
         "comment-transport-preexisting",
     }:
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": (
-                        "TRANSPORT_UNCERTAIN: connection closed before the "
-                        "create response was received"
-                    ),
-                }
-            ],
-            "isError": True,
-        }
+        return error_result(
+            "TRANSPORT_UNCERTAIN: connection closed before the create response was received"
+        )
     if name == "create_work_item_comment" and scenario == "comment-business-error":
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": (
-                        "INVALID_ARGUMENT: comment content violates the "
-                        "project text policy"
-                    ),
-                }
-            ],
-            "isError": True,
-        }
+        return error_result(
+            "INVALID_ARGUMENT: comment content violates the project text policy"
+        )
     if name == "create_work_item_comment" and scenario == "comment-permission-denied":
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": (
-                        "PERMISSION_DENIED: current OAuth identity cannot create "
-                        "comments on wi-controlled-123"
-                    ),
-                }
-            ],
-            "isError": True,
-        }
+        return error_result(
+            "PERMISSION_DENIED: current OAuth identity cannot create comments "
+            "on wi-controlled-123"
+        )
     if name == "create_work_item_comment" and scenario == "comment-unauthenticated":
-        return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": "UNAUTHENTICATED: OAuth session expired before comment creation",
-                }
-            ],
-            "isError": True,
-        }
+        return error_result(
+            "UNAUTHENTICATED: OAuth session expired before comment creation"
+        )
     successful_comment_scenarios = {
         "exact-comment",
         "comment-approval-required",
@@ -405,18 +367,10 @@ def tool_result(
         }
         comments.append(created_comment)
         if scenario == "comment-transport-confirmed":
-            return {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": (
-                            "TRANSPORT_UNCERTAIN: response stream closed after "
-                            "the server accepted the comment"
-                        ),
-                    }
-                ],
-                "isError": True,
-            }
+            return error_result(
+                "TRANSPORT_UNCERTAIN: response stream closed after the server "
+                "accepted the comment"
+            )
         return success_result(
             {
                 "comment": created_comment,
@@ -424,10 +378,7 @@ def tool_result(
             }
         )
     if name in {"update_work_item", "create_work_item_comment"}:
-        return {
-            "content": [{"type": "text", "text": "WRITE_TRAP_CALLED"}],
-            "isError": True,
-        }
+        return error_result("WRITE_TRAP_CALLED")
     return success_result(WORK_ITEM)
 
 
@@ -443,7 +394,7 @@ def main() -> None:
                     "id": "user-controlled",
                     "name": "受控执行用户",
                 },
-                "content": "请保持发布窗口开放，直到回归测试全部通过。",
+                "content": EXACT_COMMENT,
                 "createdAt": "2026-08-26T12:00:00Z",
             }
         )

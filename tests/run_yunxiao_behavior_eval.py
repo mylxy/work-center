@@ -7,6 +7,8 @@ import shutil
 import subprocess
 import tempfile
 
+from controlled_yunxiao_mcp import EXACT_COMMENT
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILL = ROOT / ".agents" / "skills" / "yunxiao-project"
@@ -73,7 +75,21 @@ DEFAULT_READ_CALLS = (
     tool_call("get_work_item", workItemId="wi-controlled-123"),
     tool_call("list_work_item_comments", workItemId="wi-controlled-123"),
 )
-EXACT_COMMENT = "请保持发布窗口开放，直到回归测试全部通过。"
+DIRECT_EXACT_COMMENT_PROMPT = (
+    "$yunxiao-project 请对 Work Item ID wi-controlled-123 直接评论。"
+    "评论原文仅位于 <comment> 与 </comment> 之间，标签不是正文："
+    f"<comment>{EXACT_COMMENT}</comment>"
+)
+EXACT_COMMENT_CREATE_CALL = tool_call(
+    "create_work_item_comment",
+    workItemId="wi-controlled-123",
+    content=EXACT_COMMENT,
+)
+EXACT_COMMENT_FAILURE_CALLS = (*DEFAULT_READ_CALLS, EXACT_COMMENT_CREATE_CALL)
+EXACT_COMMENT_SUCCESS_CALLS = (
+    *EXACT_COMMENT_FAILURE_CALLS,
+    tool_call("list_work_item_comments", workItemId="wi-controlled-123"),
+)
 NUMBER_SEARCH_CALL = tool_call(
     "search_workitems",
     projectId="project-controlled",
@@ -95,20 +111,9 @@ SCENARIOS = {
         "calls": DEFAULT_READ_CALLS,
     },
     "exact-comment": {
-        "prompt": (
-            "$yunxiao-project 请对 Work Item ID wi-controlled-123 直接评论，"
-            f"评论原文如下：{EXACT_COMMENT}"
-        ),
+        "prompt": DIRECT_EXACT_COMMENT_PROMPT,
         "expected": (EXACT_COMMENT, "comment-created-1", "受控执行用户"),
-        "calls": (
-            *DEFAULT_READ_CALLS,
-            tool_call(
-                "create_work_item_comment",
-                workItemId="wi-controlled-123",
-                content=EXACT_COMMENT,
-            ),
-            tool_call("list_work_item_comments", workItemId="wi-controlled-123"),
-        ),
+        "calls": EXACT_COMMENT_SUCCESS_CALLS,
         "comment_write_sequence": True,
         "allow_controlled_write": True,
     },
@@ -131,111 +136,56 @@ SCENARIOS = {
         ),
     },
     "comment-transport-uncertain": {
-        "prompt": (
-            "$yunxiao-project 请对 Work Item ID wi-controlled-123 直接评论，"
-            f"评论原文如下：{EXACT_COMMENT}"
-        ),
+        "prompt": DIRECT_EXACT_COMMENT_PROMPT,
         "expected": (
             "结果不确定",
             "connection closed",
             "不会自动",
             EXACT_COMMENT,
         ),
-        "calls": (
-            *DEFAULT_READ_CALLS,
-            tool_call(
-                "create_work_item_comment",
-                workItemId="wi-controlled-123",
-                content=EXACT_COMMENT,
-            ),
-            tool_call("list_work_item_comments", workItemId="wi-controlled-123"),
-        ),
+        "calls": EXACT_COMMENT_SUCCESS_CALLS,
         "comment_write_sequence": True,
         "allow_controlled_write": True,
     },
     "comment-transport-preexisting": {
-        "prompt": (
-            "$yunxiao-project 请对 Work Item ID wi-controlled-123 直接评论，"
-            f"评论原文如下：{EXACT_COMMENT}"
-        ),
+        "prompt": DIRECT_EXACT_COMMENT_PROMPT,
         "expected": (
             "结果不确定",
             "comment-preexisting",
             "不会自动",
         ),
-        "calls": (
-            *DEFAULT_READ_CALLS,
-            tool_call(
-                "create_work_item_comment",
-                workItemId="wi-controlled-123",
-                content=EXACT_COMMENT,
-            ),
-            tool_call("list_work_item_comments", workItemId="wi-controlled-123"),
-        ),
+        "calls": EXACT_COMMENT_SUCCESS_CALLS,
         "comment_write_sequence": True,
         "allow_controlled_write": True,
     },
     "comment-business-error": {
-        "prompt": (
-            "$yunxiao-project 请对 Work Item ID wi-controlled-123 直接评论，"
-            f"评论原文如下：{EXACT_COMMENT}"
-        ),
+        "prompt": DIRECT_EXACT_COMMENT_PROMPT,
         "expected": (
             "业务规则拒绝",
             "INVALID_ARGUMENT",
             "project text policy",
             "需要",
         ),
-        "calls": (
-            *DEFAULT_READ_CALLS,
-            tool_call(
-                "create_work_item_comment",
-                workItemId="wi-controlled-123",
-                content=EXACT_COMMENT,
-            ),
-        ),
+        "calls": EXACT_COMMENT_FAILURE_CALLS,
         "comment_write_sequence": True,
         "allow_controlled_write": True,
     },
     "comment-permission-denied": {
-        "prompt": (
-            "$yunxiao-project 请对 Work Item ID wi-controlled-123 直接评论，"
-            f"评论原文如下：{EXACT_COMMENT}"
-        ),
+        "prompt": DIRECT_EXACT_COMMENT_PROMPT,
         "expected": ("无权限", "PERMISSION_DENIED", "当前 OAuth", "评论"),
-        "calls": (
-            *DEFAULT_READ_CALLS,
-            tool_call(
-                "create_work_item_comment",
-                workItemId="wi-controlled-123",
-                content=EXACT_COMMENT,
-            ),
-        ),
+        "calls": EXACT_COMMENT_FAILURE_CALLS,
         "comment_write_sequence": True,
         "allow_controlled_write": True,
     },
     "comment-unauthenticated": {
-        "prompt": (
-            "$yunxiao-project 请对 Work Item ID wi-controlled-123 直接评论，"
-            f"评论原文如下：{EXACT_COMMENT}"
-        ),
+        "prompt": DIRECT_EXACT_COMMENT_PROMPT,
         "expected": ("未认证或认证过期", "重新", "OAuth"),
-        "calls": (
-            *DEFAULT_READ_CALLS,
-            tool_call(
-                "create_work_item_comment",
-                workItemId="wi-controlled-123",
-                content=EXACT_COMMENT,
-            ),
-        ),
+        "calls": EXACT_COMMENT_FAILURE_CALLS,
         "comment_write_sequence": True,
         "allow_controlled_write": True,
     },
     "comment-missing-tool": {
-        "prompt": (
-            "$yunxiao-project 请对 Work Item ID wi-controlled-123 直接评论，"
-            f"评论原文如下：{EXACT_COMMENT}"
-        ),
+        "prompt": DIRECT_EXACT_COMMENT_PROMPT,
         "expected": (
             "缺少能力",
             "create_work_item_comment",
@@ -244,10 +194,7 @@ SCENARIOS = {
         "calls": (),
     },
     "comment-approval-required": {
-        "prompt": (
-            "$yunxiao-project 请对 Work Item ID wi-controlled-123 直接评论，"
-            f"评论原文如下：{EXACT_COMMENT}"
-        ),
+        "prompt": DIRECT_EXACT_COMMENT_PROMPT,
         "expected": ("写入未获批准", "MCP 写工具审批", "create_work_item_comment"),
         "calls": DEFAULT_READ_CALLS,
     },
@@ -280,6 +227,14 @@ SCENARIOS = {
         "expected": ("第一版", "顶层评论", "不支持", "回复"),
         "calls": (),
     },
+    "existing-comment-mutations": {
+        "prompt": (
+            "$yunxiao-project 请编辑 Work Item ID wi-controlled-123 的评论 comment-1，"
+            "删除 comment-2，并置顶 comment-3。"
+        ),
+        "expected": ("不支持", "编辑", "删除", "置顶"),
+        "calls": (),
+    },
     "multiple-comment-targets": {
         "prompt": (
             "$yunxiao-project 请对 Work Item ID wi-controlled-123 和 "
@@ -289,24 +244,14 @@ SCENARIOS = {
         "calls": (),
     },
     "comment-transport-confirmed": {
-        "prompt": (
-            "$yunxiao-project 请对 Work Item ID wi-controlled-123 直接评论，"
-            f"评论原文如下：{EXACT_COMMENT}"
-        ),
+        "prompt": DIRECT_EXACT_COMMENT_PROMPT,
         "expected": (
+            "结果不确定",
             "comment-created-1",
-            "受控执行用户",
+            "不会自动",
             EXACT_COMMENT,
         ),
-        "calls": (
-            *DEFAULT_READ_CALLS,
-            tool_call(
-                "create_work_item_comment",
-                workItemId="wi-controlled-123",
-                content=EXACT_COMMENT,
-            ),
-            tool_call("list_work_item_comments", workItemId="wi-controlled-123"),
-        ),
+        "calls": EXACT_COMMENT_SUCCESS_CALLS,
         "comment_write_sequence": True,
         "allow_controlled_write": True,
     },
