@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SKILL = ROOT / ".agents" / "skills" / "yunxiao-project"
 SERVER = Path(__file__).with_name("controlled_yunxiao_mcp.py")
 DEFAULT_PROMPT = "$yunxiao-project 请读取 Work Item ID wi-controlled-123。"
-COMPACT_EXPECTATIONS = (
+COMMON_WORK_ITEM_EXPECTATIONS = (
     "wi-controlled-123",
     "DSDD-123",
     "电池状态接口超时",
@@ -25,16 +25,22 @@ COMPACT_EXPECTATIONS = (
     "设备偶发无法读取最新电池状态。",
     "影响版本",
     "3.2.1",
-    *(
+)
+
+
+def comment_expectations(first: int, last: int) -> tuple[str, ...]:
+    return tuple(
         fragment
-        for index in range(3, 8)
+        for index in range(first, last + 1)
         for fragment in (
             f"评论用户{index}",
             f"2026-08-{19 + index:02d}T10:00:00Z",
             f"受控评论 {index}",
         )
-    ),
-)
+    )
+
+
+COMPACT_EXPECTATIONS = (*COMMON_WORK_ITEM_EXPECTATIONS, *comment_expectations(3, 7))
 COMPACT_FORBIDDEN = (
     "受控评论 1",
     "受控评论 2",
@@ -42,32 +48,13 @@ COMPACT_FORBIDDEN = (
     "Normal → High",
 )
 FULL_EXPECTATIONS = (
-    "wi-controlled-123",
-    "DSDD-123",
-    "电池状态接口超时",
-    "project-controlled",
-    "设备云",
-    "Bug",
+    *COMMON_WORK_ITEM_EXPECTATIONS,
     "status-processing",
-    "处理中",
-    "High",
-    "测试用户",
-    "设备偶发无法读取最新电池状态。",
-    "影响版本",
-    "3.2.1",
     "空字段",
     "报告用户",
     "2026-08-20T08:00:00Z",
     "2026-08-26T09:30:00Z",
-    *(
-        fragment
-        for index in range(1, 8)
-        for fragment in (
-            f"评论用户{index}",
-            f"2026-08-{19 + index:02d}T10:00:00Z",
-            f"受控评论 {index}",
-        )
-    ),
+    *comment_expectations(1, 7),
     "更新 Status",
     "待处理 → 处理中",
     "更新优先级",
@@ -90,6 +77,15 @@ NUMBER_SEARCH_CALL = tool_call(
     "search_workitems",
     projectId="project-controlled",
     query="DSDD-123",
+)
+FIRST_COMMENTS_CALL = tool_call(
+    "list_work_item_comments",
+    workItemId="wi-controlled-123",
+)
+NEXT_COMMENTS_CALL = tool_call(
+    "list_work_item_comments",
+    workItemId="wi-controlled-123",
+    cursor="comments-page-2",
 )
 SCENARIOS = {
     "success": {
@@ -170,14 +166,11 @@ SCENARIOS = {
         "expected": FULL_EXPECTATIONS,
         "calls": (
             tool_call("get_work_item", workItemId="wi-controlled-123"),
-            tool_call("list_work_item_comments", workItemId="wi-controlled-123"),
-            tool_call(
-                "list_work_item_comments",
-                workItemId="wi-controlled-123",
-                cursor="comments-page-2",
-            ),
+            FIRST_COMMENTS_CALL,
+            NEXT_COMMENTS_CALL,
             tool_call("list_workitem_activities", workItemId="wi-controlled-123"),
         ),
+        "ordered_pairs": ((FIRST_COMMENTS_CALL, NEXT_COMMENTS_CALL),),
     },
     "unauthenticated": {
         "expected": ("未认证或认证过期", "重新", "OAuth"),
@@ -209,11 +202,19 @@ def normalized_calls(calls: list[dict]) -> Counter:
     return Counter(json.dumps(call, ensure_ascii=False, sort_keys=True) for call in calls)
 
 
-def assert_calls(observed: list[dict], expected: tuple[dict, ...], prefix: int) -> None:
+def assert_calls(
+    observed: list[dict],
+    expected: tuple[dict, ...],
+    prefix: int,
+    ordered_pairs: tuple[tuple[dict, dict], ...],
+) -> None:
     if observed[:prefix] != list(expected[:prefix]):
         raise AssertionError(f"Unexpected ordered MCP calls: {observed}")
     if normalized_calls(observed[prefix:]) != normalized_calls(list(expected[prefix:])):
         raise AssertionError(f"Unexpected MCP calls: {observed}")
+    for earlier, later in ordered_pairs:
+        if observed.index(earlier) >= observed.index(later):
+            raise AssertionError(f"MCP calls occurred out of dependency order: {observed}")
 
 
 def main() -> None:
@@ -305,6 +306,7 @@ def main() -> None:
             observed_calls,
             scenario["calls"],
             scenario.get("ordered_prefix", 0),
+            scenario.get("ordered_pairs", ()),
         )
         print(output)
 
