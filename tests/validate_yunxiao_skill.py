@@ -12,13 +12,19 @@ from typing import Any
 HOSTED_ENDPOINT = (
     "https://openapi-rdc.aliyuncs.com/ai/mcp?toolsets=project-management"
 )
-ALLOWED_FRONTMATTER = {"name", "description", "metadata"}
+ALLOWED_FRONTMATTER = {"name", "description", "disable-model-invocation"}
 CREDENTIAL_PATTERNS = (
     r"(?i)Bearer\s+[A-Za-z0-9._~-]+",
     r"\bpt-[A-Za-z0-9_-]+",
     r"\boat-[A-Za-z0-9_-]+",
     r"\bort-[A-Za-z0-9_-]+",
     r"(?i)(?:access|refresh|oauth|yunxiao)[_-]?token\s*:",
+)
+UNFINISHED_PATTERNS = (
+    r"\[TODO(?::|\])",
+    r"(?im)^\s*TBD(?:\s*:|\s*$)",
+    r"(?im)^\s*PLACEHOLDER(?:\s*:|\s*$)",
+    r"<YOUR_[A-Z0-9_]+>",
 )
 
 
@@ -78,6 +84,7 @@ def validate_skill(skill_dir: Path) -> list[str]:
         skill_dir / "SKILL.md",
         skill_dir / "agents" / "openai.yaml",
         skill_dir / "profile.yaml",
+        skill_dir / "references" / "status-transition.md",
     )
     missing = [
         str(path.relative_to(skill_dir))
@@ -103,12 +110,8 @@ def validate_skill(skill_dir: Path) -> list[str]:
         errors.append("frontmatter description must be non-empty")
     elif "$yunxiao-project" not in description or "only" not in description.lower():
         errors.append("frontmatter description must require explicit invocation")
-    frontmatter_metadata = mapping_node(frontmatter, "metadata", errors)
-    if frontmatter_metadata.get("disable-model-invocation") is not True:
-        errors.append("metadata.disable-model-invocation must be true")
-    if "[TODO:" in skill_text:
-        errors.append("SKILL.md contains unresolved TODO markers")
-
+    if frontmatter.get("disable-model-invocation") is not True:
+        errors.append("disable-model-invocation must be true")
     interface = mapping_node(metadata, "interface", errors)
     if interface.get("display_name") != "YunXiaoProject":
         errors.append("interface.display_name must be YunXiaoProject")
@@ -158,6 +161,9 @@ def validate_skill(skill_dir: Path) -> list[str]:
     for pattern in CREDENTIAL_PATTERNS:
         if re.search(pattern, package_text):
             errors.append(f"package contains a credential-like value matching {pattern!r}")
+    for pattern in UNFINISHED_PATTERNS:
+        if re.search(pattern, package_text):
+            errors.append(f"package contains unfinished scaffold matching {pattern!r}")
     return errors
 
 

@@ -34,7 +34,7 @@ class YunxiaoProjectPackageTests(unittest.TestCase):
             candidate = Path(directory) / "yunxiao-project"
             shutil.copytree(SKILL, candidate)
             with (candidate / "profile.yaml").open("a") as profile:
-                profile.write("oauth_token: leaked-value\n")
+                profile.write("oauth_" + "token: " + "leaked-value\n")
 
             errors = validate_skill(candidate)
 
@@ -57,6 +57,35 @@ class YunxiaoProjectPackageTests(unittest.TestCase):
             errors = validate_skill(candidate)
 
         self.assertEqual(errors, [])
+
+    def test_validator_requires_status_transition_reference(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="yunxiao-validator-") as directory:
+            candidate = Path(directory) / ".agents" / "skills" / "yunxiao-project"
+            candidate.parent.mkdir(parents=True)
+            shutil.copytree(SKILL, candidate)
+            (candidate / "references" / "status-transition.md").unlink()
+
+            errors = validate_skill(candidate)
+
+        self.assertIn(
+            "missing required file: references/status-transition.md",
+            errors,
+        )
+
+    def test_validator_rejects_unfinished_scaffolding(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="yunxiao-validator-") as directory:
+            candidate = Path(directory) / ".agents" / "skills" / "yunxiao-project"
+            candidate.parent.mkdir(parents=True)
+            shutil.copytree(SKILL, candidate)
+            with (candidate / "SKILL.md").open("a") as skill:
+                skill.write("\nTBD: finish installation guidance\n")
+
+            errors = validate_skill(candidate)
+
+        self.assertTrue(
+            any("unfinished scaffold" in error for error in errors),
+            errors,
+        )
 
 
 if __name__ == "__main__":
