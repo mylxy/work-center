@@ -2,6 +2,7 @@
 import argparse
 from collections import Counter
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -654,9 +655,18 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory(prefix="yunxiao-behavior-") as directory:
         workspace = Path(directory)
+        isolated_codex_home = workspace / "codex-home"
+        isolated_codex_home.mkdir()
+        configured_codex_home = Path(
+            os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))
+        )
+        auth_source = configured_codex_home / "auth.json"
+        if not auth_source.is_file():
+            raise AssertionError("Codex model login is required for behavior evaluation")
+        (isolated_codex_home / "auth.json").symlink_to(auth_source)
         call_log = workspace / "calls.jsonl"
         final_output = workspace / "final.txt"
-        installed_skill = workspace / ".agents" / "skills" / "yunxiao-project"
+        installed_skill = isolated_codex_home / "skills" / "yunxiao-project"
         shutil.copytree(SKILL, installed_skill)
         (installed_skill / "profile.yaml").write_text(profile_text)
         subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
@@ -677,8 +687,9 @@ def main() -> None:
                 "exec",
                 "--model",
                 "gpt-5.5",
+                "-c",
+                'model_verbosity="high"',
                 "--ephemeral",
-                "--ignore-user-config",
                 "--skip-git-repo-check",
             ]
         )
@@ -705,11 +716,16 @@ def main() -> None:
                     ),
                 ]
             )
-        command.append(scenario.get("prompt", DEFAULT_PROMPT))
+        scenario_prompt = scenario.get("prompt", DEFAULT_PROMPT)
+        command.append(
+            f"Use $yunxiao-project at {installed_skill / 'SKILL.md'} "
+            f"to handle this request: {scenario_prompt}"
+        )
         completed = subprocess.run(
             command,
             cwd=workspace,
             capture_output=True,
+            env={**os.environ, "CODEX_HOME": str(isolated_codex_home)},
             text=True,
             timeout=180,
         )
@@ -719,10 +735,24 @@ def main() -> None:
             )
 
         output = final_output.read_text()
+        calls = []
+        if call_log.exists():
+            calls = [json.loads(line) for line in call_log.read_text().splitlines()]
+        observed_calls = [
+            {"name": call.get("name"), "arguments": call.get("arguments")}
+            for call in calls
+        ]
+        skill_diagnostics = [
+            line[:500]
+            for line in completed.stderr.splitlines()
+            if "codex_core_skills" in line
+        ]
         for fragment in scenario["expected"]:
             if fragment not in output:
                 raise AssertionError(
-                    f"Expected {fragment!r} in user-visible output:\n{output}"
+                    f"Expected {fragment!r} in user-visible output:\n{output}\n"
+                    f"Observed MCP calls: {observed_calls}\n"
+                    f"Skill diagnostics: {skill_diagnostics}"
                 )
         for alternatives in scenario.get("expected_any", ()):
             if not any(fragment in output for fragment in alternatives):
@@ -735,13 +765,6 @@ def main() -> None:
                     f"Did not expect {fragment!r} in user-visible output:\n{output}"
                 )
 
-        calls = []
-        if call_log.exists():
-            calls = [json.loads(line) for line in call_log.read_text().splitlines()]
-        observed_calls = [
-            {"name": call.get("name"), "arguments": call.get("arguments")}
-            for call in calls
-        ]
         try:
             if "expected_call_names" in scenario:
                 assert_generated_comment_calls(
