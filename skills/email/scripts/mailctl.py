@@ -301,9 +301,12 @@ class ImapMailbox:
                 tokens.extend((key, timestamp.strftime("%d-%b-%Y")))
         if not tokens:
             tokens.append("ALL")
-        status, data = self.client.uid("SEARCH", None, *tokens)
+        try:
+            status, data = self.client.uid("SEARCH", None, *tokens)
+        except imaplib.IMAP4.error as error:
+            raise MailctlError("capability", "IMAP search rejected by server") from error
         if status != "OK":
-            raise MailctlError("connection", "IMAP search failed")
+            raise MailctlError("capability", "IMAP search rejected by server")
         return [int(value) for value in (data[0] or b"").split()]
 
     def summary(self, uid: int) -> dict[str, object]:
@@ -383,8 +386,6 @@ def command_search(args: argparse.Namespace) -> dict[str, object]:
     criteria: list[tuple[str, object]] = []
     from_address = validate_email(args.from_address) if args.from_address else None
     to_address = validate_email(args.to_address) if args.to_address else None
-    if from_address:
-        criteria.append(("FROM", from_address))
     if to_address:
         criteria.append(("TO", to_address))
     since_time = parse_timestamp(args.since, "since") if args.since else None
@@ -411,10 +412,8 @@ def command_search(args: argparse.Namespace) -> dict[str, object]:
             uids = sorted(mailbox.search(criteria), reverse=True)
             if before_uid is not None:
                 uids = [uid for uid in uids if uid < before_uid]
-            candidates = uids[: args.limit + 1]
-            page_uids = candidates[: args.limit]
-            items: list[dict[str, object]] = []
-            for uid in page_uids:
+            matches: list[dict[str, object]] = []
+            for uid in uids:
                 item = mailbox.summary(uid)
                 if from_address and from_address.lower() not in {
                     str(value).lower() for value in item.get("from", [])
@@ -447,10 +446,13 @@ def command_search(args: argparse.Namespace) -> dict[str, object]:
                         "message_id": item.get("message_id", ""),
                     }
                 )
-                items.append(item)
+                matches.append(item)
+                if len(matches) > args.limit:
+                    break
+            items = matches[: args.limit]
             next_cursor = (
-                encode_token({"before_uid": page_uids[-1]})
-                if len(candidates) > args.limit and page_uids
+                encode_token({"before_uid": items[-1]["uid"]})
+                if len(matches) > args.limit and items
                 else None
             )
         return {"status": "ok", "items": items, "next_cursor": next_cursor}
