@@ -139,8 +139,16 @@ def validate_skill(skill_dir: Path) -> list[str]:
     }
     if dependencies != [expected_dependency]:
         errors.append("dependencies.tools must declare only the hosted Yunxiao MCP")
-    if profile != {"mcp_endpoint": HOSTED_ENDPOINT, "organization_id": None}:
-        errors.append("profile.yaml must contain only the endpoint and empty organization ID")
+    if set(profile) != {"mcp_endpoint", "organization_id", "default_project_id"}:
+        errors.append(
+            "profile.yaml must contain only endpoint, organization ID, and default project ID"
+        )
+    if profile.get("mcp_endpoint") != HOSTED_ENDPOINT:
+        errors.append("profile.yaml must use the hosted Yunxiao MCP endpoint")
+    for key in ("organization_id", "default_project_id"):
+        value = profile.get(key)
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            errors.append(f"profile.yaml {key} must be null or a non-empty string")
 
     package_text = "\n".join(
         path.read_text()

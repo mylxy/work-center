@@ -15,7 +15,37 @@ WORK_ITEM = {
     "priority": "High",
     "assignedTo": {"name": "测试用户"},
     "description": "设备偶发无法读取最新电池状态。",
+    "customFields": [
+        {"name": "影响版本", "value": "3.2.1"},
+        {"name": "空字段", "value": None},
+    ],
+    "createdBy": {"name": "报告用户"},
+    "createdAt": "2026-08-20T08:00:00Z",
+    "updatedAt": "2026-08-26T09:30:00Z",
 }
+COMMENTS = [
+    {
+        "id": f"comment-{index}",
+        "author": {"name": f"评论用户{index}"},
+        "content": f"受控评论 {index}",
+        "createdAt": f"2026-08-{19 + index:02d}T10:00:00Z",
+    }
+    for index in range(1, 8)
+]
+ACTIVITIES = [
+    {
+        "id": "activity-1",
+        "action": "更新 Status",
+        "detail": "待处理 → 处理中",
+        "createdAt": "2026-08-26T09:30:00Z",
+    },
+    {
+        "id": "activity-2",
+        "action": "更新优先级",
+        "detail": "Normal → High",
+        "createdAt": "2026-08-25T09:00:00Z",
+    },
+]
 ERROR_RESULTS = {
     "unauthenticated": {
         "content": [
@@ -46,7 +76,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--log", required=True)
     parser.add_argument(
         "--scenario",
-        choices=("success", "unauthenticated", "permission-denied", "missing-tool"),
+        choices=(
+            "success",
+            "number-compact",
+            "url-compact",
+            "missing-project",
+            "wrong-project",
+            "zero-match",
+            "multiple-match",
+            "full-detail",
+            "unauthenticated",
+            "permission-denied",
+            "missing-tool",
+        ),
         default="success",
     )
     return parser.parse_args()
@@ -99,19 +141,178 @@ def identity_tool_definition() -> dict:
     }
 
 
-def tool_result(scenario: str) -> dict:
-    if scenario in ERROR_RESULTS:
-        return ERROR_RESULTS[scenario]
+def search_tool_definition() -> dict:
+    return {
+        "name": "search_workitems",
+        "description": "Search Work Items inside exactly one Yunxiao project.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "organizationId": {"type": "string"},
+                "projectId": {"type": "string"},
+                "query": {"type": "string"},
+            },
+            "required": ["organizationId", "projectId", "query"],
+            "additionalProperties": False,
+        },
+        "annotations": {
+            "title": "Search Work Items",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+    }
+
+
+def comments_tool_definition() -> dict:
+    return {
+        "name": "list_work_item_comments",
+        "description": "List one page of comments for a Work Item, oldest first.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "organizationId": {"type": "string"},
+                "workItemId": {"type": "string"},
+                "cursor": {"type": "string"},
+            },
+            "required": ["organizationId", "workItemId"],
+            "additionalProperties": False,
+        },
+        "annotations": {
+            "title": "List Work Item Comments",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+    }
+
+
+def activities_tool_definition() -> dict:
+    return {
+        "name": "list_workitem_activities",
+        "description": "List recent activity for one Work Item, newest first.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "organizationId": {"type": "string"},
+                "workItemId": {"type": "string"},
+            },
+            "required": ["organizationId", "workItemId"],
+            "additionalProperties": False,
+        },
+        "annotations": {
+            "title": "List Work Item Activities",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+    }
+
+
+def write_tool_definition(name: str, title: str) -> dict:
+    return {
+        "name": name,
+        "description": "Controlled write trap; read-only scenarios must never call this.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "organizationId": {"type": "string"},
+                "workItemId": {"type": "string"},
+            },
+            "required": ["organizationId", "workItemId"],
+            "additionalProperties": True,
+        },
+        "annotations": {
+            "title": title,
+            "readOnlyHint": False,
+            "destructiveHint": True,
+            "idempotentHint": False,
+            "openWorldHint": False,
+        },
+    }
+
+
+def success_result(data: dict) -> dict:
     return {
         "content": [
             {
                 "type": "text",
-                "text": json.dumps(WORK_ITEM, ensure_ascii=False),
+                "text": json.dumps(data, ensure_ascii=False),
             }
         ],
-        "structuredContent": WORK_ITEM,
+        "structuredContent": data,
         "isError": False,
     }
+
+
+def search_results(scenario: str) -> list[dict]:
+    if scenario in {"wrong-project", "zero-match"}:
+        return [
+            {
+                "id": "wi-near-123",
+                "serialNumber": "OTHER-123",
+                "subject": "非精确候选",
+                "project": {"id": "project-controlled", "name": "设备云"},
+            }
+        ]
+    if scenario == "multiple-match":
+        return [
+            {
+                "id": "wi-controlled-123",
+                "serialNumber": "DSDD-123",
+                "subject": "电池状态接口超时",
+                "project": {"id": "project-controlled", "name": "设备云"},
+            },
+            {
+                "id": "wi-duplicate-123",
+                "serialNumber": "DSDD-123",
+                "subject": "重复编号受控数据",
+                "project": {"id": "project-controlled", "name": "设备云"},
+            },
+        ]
+    return [
+        {
+            "id": "wi-near-12",
+            "serialNumber": "DSDD-12",
+            "subject": "近似但不相同",
+            "project": {"id": "project-controlled", "name": "设备云"},
+        },
+        {
+            "id": "wi-controlled-123",
+            "serialNumber": "DSDD-123",
+            "subject": "电池状态接口超时",
+            "project": {"id": "project-controlled", "name": "设备云"},
+        },
+    ]
+
+
+def tool_result(scenario: str, name: str, arguments: dict) -> dict:
+    if name == "get_work_item" and scenario in ERROR_RESULTS:
+        return ERROR_RESULTS[scenario]
+    if name == "search_workitems":
+        return success_result({"items": search_results(scenario)})
+    if name == "list_work_item_comments":
+        if scenario == "full-detail" and not arguments.get("cursor"):
+            return success_result(
+                {
+                    "comments": COMMENTS[:4],
+                    "nextCursor": "comments-page-2",
+                }
+            )
+        if scenario == "full-detail" and arguments.get("cursor") == "comments-page-2":
+            return success_result({"comments": COMMENTS[4:], "nextCursor": None})
+        return success_result({"comments": COMMENTS})
+    if name == "list_workitem_activities":
+        return success_result({"activities": ACTIVITIES})
+    if name in {"update_work_item", "create_work_item_comment"}:
+        return {
+            "content": [{"type": "text", "text": "WRITE_TRAP_CALLED"}],
+            "isError": True,
+        }
+    return success_result(WORK_ITEM)
 
 
 def main() -> None:
@@ -144,7 +345,17 @@ def main() -> None:
             tools = (
                 [identity_tool_definition()]
                 if args.scenario == "missing-tool"
-                else [tool_definition()]
+                else [
+                    tool_definition(),
+                    search_tool_definition(),
+                    comments_tool_definition(),
+                    activities_tool_definition(),
+                    write_tool_definition("update_work_item", "Update Work Item"),
+                    write_tool_definition(
+                        "create_work_item_comment",
+                        "Create Work Item Comment",
+                    ),
+                ]
             )
             send(
                 {
@@ -162,7 +373,11 @@ def main() -> None:
                 {
                     "jsonrpc": "2.0",
                     "id": request_id,
-                    "result": tool_result(args.scenario),
+                    "result": tool_result(
+                        args.scenario,
+                        message["params"]["name"],
+                        message["params"].get("arguments", {}),
+                    ),
                 }
             )
             continue
