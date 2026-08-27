@@ -118,6 +118,27 @@ def status_rejection_scenario(*expected: str) -> dict:
     }
 
 
+def status_writeback_scenario(
+    *expected: str,
+    prompt: str = STATUS_CHANGE_PROMPT,
+) -> dict:
+    return {
+        "prompt": prompt,
+        "expected": expected,
+        "calls": (
+            *STATUS_MUTATION_CALLS,
+            tool_call("get_work_item", workItemId="wi-controlled-123"),
+        ),
+        "ordered_names": (
+            "get_work_item",
+            "get_work_item_workflow",
+            "update_work_item",
+            "get_work_item",
+        ),
+        "controlled_write_authorized": True,
+    }
+
+
 SCENARIOS = {
     "success": {
         "expected": COMPACT_EXPECTATIONS,
@@ -332,103 +353,32 @@ SCENARIOS = {
         "下一步",
         "补齐",
     ),
-    "status-transport-uncertain": {
-        "prompt": (
-            "$yunxiao-project 请直接修改 Work Item ID wi-controlled-123 的 "
-            "Status 为“已完成”。"
-        ),
-        "expected": (
-            "结果不确定",
-            "TRANSPORT_UNCERTAIN",
-            "处理中",
-            "没有重试",
-        ),
-        "calls": (
-            tool_call("get_work_item", workItemId="wi-controlled-123"),
-            STATUS_WORKFLOW_CALL,
-            CURRENT_USER_CALL,
-            STATUS_UPDATE_CALL,
-            tool_call("get_work_item", workItemId="wi-controlled-123"),
-        ),
-        "ordered_names": (
-            "get_work_item",
-            "get_work_item_workflow",
-            "update_work_item",
-            "get_work_item",
-        ),
-        "controlled_write_authorized": True,
-    },
-    "status-verification-mismatch": {
-        "prompt": (
-            "$yunxiao-project 请直接修改 Work Item ID wi-controlled-123 的 "
-            "Status 为“已完成”。"
-        ),
-        "expected": (
-            "结果不确定",
-            "status-done",
-            "status-done-alias",
-        ),
-        "calls": (
-            tool_call("get_work_item", workItemId="wi-controlled-123"),
-            STATUS_WORKFLOW_CALL,
-            CURRENT_USER_CALL,
-            STATUS_UPDATE_CALL,
-            tool_call("get_work_item", workItemId="wi-controlled-123"),
-        ),
-        "ordered_names": (
-            "get_work_item",
-            "get_work_item_workflow",
-            "update_work_item",
-            "get_work_item",
-        ),
-        "controlled_write_authorized": True,
-    },
-    "status-transport-mismatch": {
-        "prompt": STATUS_CHANGE_PROMPT,
-        "expected": (
-            "结果不确定",
-            "status-done",
-            "status-done-alias",
-        ),
-        "calls": (
-            *STATUS_MUTATION_CALLS,
-            tool_call("get_work_item", workItemId="wi-controlled-123"),
-        ),
-        "ordered_names": (
-            "get_work_item",
-            "get_work_item_workflow",
-            "update_work_item",
-            "get_work_item",
-        ),
-        "controlled_write_authorized": True,
-    },
-    "status-direct-success": {
-        "prompt": (
+    "status-transport-uncertain": status_writeback_scenario(
+        "结果不确定",
+        "TRANSPORT_UNCERTAIN",
+        "处理中",
+    ),
+    "status-verification-mismatch": status_writeback_scenario(
+        "结果不确定",
+        "status-done",
+        "status-done-alias",
+    ),
+    "status-transport-mismatch": status_writeback_scenario(
+        "结果不确定",
+        "status-done",
+        "status-done-alias",
+    ),
+    "status-direct-success": status_writeback_scenario(
+        "wi-controlled-123",
+        "DSDD-123",
+        "处理中",
+        "已完成",
+        "执行用户",
+        prompt=(
             "$yunxiao-project 请直接修改 Work Item ID wi-controlled-123 的 "
             "Status 为“已完成”，无需确认。"
         ),
-        "expected": (
-            "wi-controlled-123",
-            "DSDD-123",
-            "处理中",
-            "已完成",
-            "执行用户",
-        ),
-        "calls": (
-            tool_call("get_work_item", workItemId="wi-controlled-123"),
-            STATUS_WORKFLOW_CALL,
-            CURRENT_USER_CALL,
-            STATUS_UPDATE_CALL,
-            tool_call("get_work_item", workItemId="wi-controlled-123"),
-        ),
-        "ordered_names": (
-            "get_work_item",
-            "get_work_item_workflow",
-            "update_work_item",
-            "get_work_item",
-        ),
-        "controlled_write_authorized": True,
-    },
+    ),
     "unconfigured": {
         "expected": (
             "MCP 未配置",

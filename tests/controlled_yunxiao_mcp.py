@@ -58,6 +58,9 @@ CURRENT_USER = {
     "name": "执行用户",
     "organizationId": "org-controlled",
 }
+TRANSPORT_UNCERTAIN_ERROR = (
+    "TRANSPORT_UNCERTAIN: connection dropped after request dispatch"
+)
 STATUS_UPDATE_ERRORS = {
     "status-workflow-rejected": (
         "WORKFLOW_RESTRICTION: transition from status-processing "
@@ -70,12 +73,8 @@ STATUS_UPDATE_ERRORS = {
     "status-required-field-rejected": (
         "REQUIRED_FIELD: resolution must be set before this transition"
     ),
-    "status-transport-uncertain": (
-        "TRANSPORT_UNCERTAIN: connection dropped after request dispatch"
-    ),
-    "status-transport-mismatch": (
-        "TRANSPORT_UNCERTAIN: connection dropped after request dispatch"
-    ),
+    "status-transport-uncertain": TRANSPORT_UNCERTAIN_ERROR,
+    "status-transport-mismatch": TRANSPORT_UNCERTAIN_ERROR,
 }
 ERROR_RESULTS = {
     "unauthenticated": {
