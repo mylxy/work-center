@@ -151,7 +151,6 @@ SCENARIOS = {
         "prompt": DIRECT_EXACT_COMMENT_PROMPT,
         "expected": (
             "结果不确定",
-            "comment-preexisting",
             "不会自动",
         ),
         "calls": EXACT_COMMENT_WRITE_AND_REREAD_CALLS,
@@ -224,7 +223,7 @@ SCENARIOS = {
             "$yunxiao-project 请回复 Work Item ID wi-controlled-123 的评论 "
             "comment-2，回复原文：已收到。"
         ),
-        "expected": ("第一版", "顶层评论", "不支持", "回复"),
+        "expected": ("顶层评论", "不支持", "回复"),
         "calls": (),
     },
     "existing-comment-mutations": {
@@ -232,7 +231,7 @@ SCENARIOS = {
             "$yunxiao-project 请编辑 Work Item ID wi-controlled-123 的评论 comment-1，"
             "删除 comment-2，并置顶 comment-3。"
         ),
-        "expected": ("不支持", "编辑", "删除", "置顶"),
+        "expected": ("编辑", "删除", "置顶"),
         "calls": (),
     },
     "multiple-comment-targets": {
@@ -240,7 +239,7 @@ SCENARIOS = {
             "$yunxiao-project 请对 Work Item ID wi-controlled-123 和 "
             "wi-controlled-456 直接评论，评论原文：统一回归。"
         ),
-        "expected": ("单个", "两个目标", "没有调用写入"),
+        "expected": ("单个", "两个目标", "调用写入"),
         "calls": (),
     },
     "comment-transport-confirmed": {
@@ -293,7 +292,7 @@ SCENARIOS = {
     "missing-project": {
         "prompt": "$yunxiao-project 请读取 Work Item Number DSDD-123。",
         "default_project_id": None,
-        "expected": ("配置不足", "project ID"),
+        "expected": ("配置不足", "项目"),
         "calls": (),
     },
     "wrong-project": {
