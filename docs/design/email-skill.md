@@ -12,7 +12,8 @@ The user wants Codex to read and send Alibaba Mail without routine webmail login
 - Bundle a Python 3.12 standard-library CLI at `scripts/mailctl`; do not require a daemon, MCP server, global command, virtual environment, or runtime package download.
 - Install the skill with the repository's symlink pattern and keep the repository copy authoritative.
 - Use IMAP over TLS on port 993 and SMTP over TLS on port 465. The first version has one `default` Mailbox Account and fixes `From` to that account.
-- Store the third-party client security password only in macOS Keychain. Never accept it through arguments, environment variables, config files, prompts, or output.
+- Store the third-party client security password only in macOS Keychain. Never accept it through arguments, environment variables, config files, Codex/chat prompts, or output; the native Keychain interaction is the only password-input surface.
+- Run `auth setup` in one reusable PTY and attach that exact session to the visible integrated terminal. Before requesting password input, verify that the visible terminal contains the full command and Keychain password prompt. If attachment or session lifetime fails, provide the absolute command for the user to run manually instead of reporting that the hidden process is waiting.
 
 ## Calling Project boundary
 
