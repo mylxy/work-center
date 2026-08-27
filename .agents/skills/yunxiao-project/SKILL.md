@@ -12,7 +12,7 @@ metadata:
 ## 执行边界
 
 - 仅使用 `agents/openai.yaml` 声明的 `yunxiao` MCP；运行时只接受中心版托管端点及 `project-management` toolset。
-- 允许的项目管理能力只有 `search_workitems`、`get_work_item`、`list_work_item_comments` 和 `list_workitem_activities`。先从工具发现结果确认本次路径需要的能力全部存在；缺少时不调用任何 MCP 工具。只有这些能力存在且 organization ID 仍缺失时，才可使用 MCP 自带的基础身份或组织发现工具确定当前身份与 organization ID。不得调用项目搜索或任何写工具。
+- 允许的项目管理能力只有 `search_workitems`、`get_work_item`、`list_work_item_comments` 和 `list_workitem_activities`。任何工具调用前先做能力门禁：ID/URL-ID 紧凑视图需要 `get_work_item` 与 `list_work_item_comments`；Number/URL-Number 还需要 `search_workitems`；完整视图还需要 `list_workitem_activities`。本次路径任一能力缺失时立即输出“缺少能力”并保持零工具调用，包括不得调用 `get_current_user` 等基础身份工具。只有能力门禁通过且 organization ID 仍缺失时，才可使用 MCP 自带的基础身份或组织发现工具确定当前身份与 organization ID。不得调用项目搜索或任何写工具。
 - 以 MCP 运行时公布的工具名称和输入 schema 为准。缺少本次读取需要的精确工具时停止，不用相近工具猜测替代。
 - 保持只读。不得更新 Status、创建评论或执行其他变更。
 - MCP 是唯一后端。连接失败时按下方错误分类停止，不切换到 CLI、curl、直接 OpenAPI 或浏览器自动化。
