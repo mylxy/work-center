@@ -44,7 +44,7 @@ metadata:
 确认 MCP、OAuth、本次需要的工具、organization ID 和唯一 Work Item ID 均可用后：
 
 1. 按运行时 schema 将 organization ID 与 Work Item ID 传给 `get_work_item`。
-2. 对同一个 Work Item ID 调用一次 `list_work_item_comments`。用户明确要求完整详情时，再对这个 ID 调用一次 `list_workitem_activities`；默认紧凑视图不得调用活动工具。ID 直接输入时，不调用 `search_workitems`；Number 输入时只能读取精确匹配得到的唯一 ID。
+2. 对同一个 Work Item ID 使用 `list_work_item_comments`。如果运行时 schema 和响应提供分页游标，完整视图必须以服务端返回的下一页游标继续读取，直到游标为空；每个游标最多使用一次，不能猜测游标。紧凑视图也必须取得足以按 `createdAt` 确定最近五条的数据。用户明确要求完整详情时，再对这个 ID 调用一次 `list_workitem_activities`；默认紧凑视图不得调用活动工具。ID 直接输入时，不调用 `search_workitems`；Number 输入时只能读取精确匹配得到的唯一 ID。
 3. 不读取其他 Work Item，也不把错误结果转换为额外搜索请求。搜索结果集合绝不能成为批量读取或批量写入目标。
 
 成功时默认返回紧凑视图，优先使用 MCP 返回的字段并包含：

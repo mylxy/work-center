@@ -1,6 +1,6 @@
 interface:
   display_name: "YunXiaoProject"
-  short_description: "通过云效官方MCP精确解析并只读查看单个WorkItem"
+  short_description: "通过云效官方 MCP 精确解析并只读查看单个 Work Item"
   default_prompt: "使用 $yunxiao-project 读取 Work Item Number DSDD-123。"
 dependencies:
   tools:

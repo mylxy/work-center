@@ -168,12 +168,13 @@ def search_tool_definition() -> dict:
 def comments_tool_definition() -> dict:
     return {
         "name": "list_work_item_comments",
-        "description": "List all comments for one Work Item, oldest first.",
+        "description": "List one page of comments for a Work Item, oldest first.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "organizationId": {"type": "string"},
                 "workItemId": {"type": "string"},
+                "cursor": {"type": "string"},
             },
             "required": ["organizationId", "workItemId"],
             "additionalProperties": False,
@@ -288,12 +289,21 @@ def search_results(scenario: str) -> list[dict]:
     ]
 
 
-def tool_result(scenario: str, name: str) -> dict:
+def tool_result(scenario: str, name: str, arguments: dict) -> dict:
     if name == "get_work_item" and scenario in ERROR_RESULTS:
         return ERROR_RESULTS[scenario]
     if name == "search_workitems":
         return success_result({"items": search_results(scenario)})
     if name == "list_work_item_comments":
+        if scenario == "full-detail" and not arguments.get("cursor"):
+            return success_result(
+                {
+                    "comments": COMMENTS[:4],
+                    "nextCursor": "comments-page-2",
+                }
+            )
+        if scenario == "full-detail" and arguments.get("cursor") == "comments-page-2":
+            return success_result({"comments": COMMENTS[4:], "nextCursor": None})
         return success_result({"comments": COMMENTS})
     if name == "list_workitem_activities":
         return success_result({"activities": ACTIVITIES})
@@ -363,7 +373,11 @@ def main() -> None:
                 {
                     "jsonrpc": "2.0",
                     "id": request_id,
-                    "result": tool_result(args.scenario, message["params"]["name"]),
+                    "result": tool_result(
+                        args.scenario,
+                        message["params"]["name"],
+                        message["params"].get("arguments", {}),
+                    ),
                 }
             )
             continue
