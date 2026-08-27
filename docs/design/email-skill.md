@@ -1,4 +1,6 @@
-# Email Skill Specification
+# Email Skill Implementation Design
+
+This document records the implementation design accepted for the local skill. GitHub Issues remain the repository's authoritative location for tracked product specifications.
 
 ## Problem
 

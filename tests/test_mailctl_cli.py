@@ -2,6 +2,7 @@ from pathlib import Path
 from contextlib import redirect_stdout
 from email import policy
 from email.parser import BytesParser
+import hashlib
 import importlib.util
 import io
 import json
@@ -202,6 +203,43 @@ class MailctlCliTests(unittest.TestCase):
             self.assertNotIn("client-password", output.getvalue())
             self.assertIn(("smtp-noop",), events)
             self.assertFalse(any(event[0] == "smtp-send" for event in events))
+
+    def test_doctor_reports_imap_login_rejection_as_authentication(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="mailctl-project-") as directory:
+            project = Path(directory)
+            self.assertEqual(
+                run_mailctl(project, "init", "--email", "owner@example.com").returncode,
+                0,
+            )
+            module = load_mailctl_module()
+
+            class RejectingImap:
+                def __init__(self, *args, **kwargs):
+                    pass
+
+                def login(self, address, password):
+                    raise module.imaplib.IMAP4.error("AUTHENTICATIONFAILED")
+
+            def fake_run(command, **kwargs):
+                if command[0] == "git":
+                    return subprocess.CompletedProcess(command, 1, "", "")
+                return subprocess.CompletedProcess(command, 0, "client-password\n", "")
+
+            previous = Path.cwd()
+            output = io.StringIO()
+            try:
+                os.chdir(project)
+                with (
+                    mock.patch.object(module.subprocess, "run", side_effect=fake_run),
+                    mock.patch.object(module.imaplib, "IMAP4_SSL", RejectingImap),
+                    redirect_stdout(output),
+                ):
+                    exit_code = module.main(["doctor"])
+            finally:
+                os.chdir(previous)
+
+            self.assertEqual(exit_code, 2)
+            self.assertEqual(json.loads(output.getvalue())["category"], "authentication")
 
     def test_search_returns_stable_references_without_mutating_mailbox(self) -> None:
         with tempfile.TemporaryDirectory(prefix="mailctl-project-") as directory:
@@ -417,6 +455,75 @@ class MailctlCliTests(unittest.TestCase):
             self.assertEqual(exit_code, 0, result)
             self.assertEqual([item["uid"] for item in result["items"]], [1])
 
+    def test_search_detects_attachment_from_imap_bodystructure(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="mailctl-project-") as directory:
+            project = Path(directory)
+            self.assertEqual(
+                run_mailctl(project, "init", "--email", "owner@example.com").returncode,
+                0,
+            )
+            module = load_mailctl_module()
+            fetch_queries: list[tuple] = []
+            header = (
+                b"From: Alice <alice@example.com>\r\n"
+                b"To: owner@example.com\r\n"
+                b"Subject: Image\r\n"
+                b"Message-ID: <image@example.com>\r\n"
+                b"Content-Type: multipart/related\r\n\r\n"
+            )
+
+            class FakeImap:
+                def __init__(self, *args, **kwargs):
+                    pass
+
+                def login(self, address, password):
+                    return "OK", []
+
+                def select(self, folder, readonly):
+                    return "OK", []
+
+                def response(self, name):
+                    return "UIDVALIDITY", [b"7"]
+
+                def uid(self, *query):
+                    if query[0] == "SEARCH":
+                        return "OK", [b"9"]
+                    fetch_queries.append(query)
+                    metadata = (
+                        b'9 (INTERNALDATE "27-Aug-2026 09:00:00 +0800" '
+                        b'BODYSTRUCTURE (("TEXT" "PLAIN" NIL NIL NIL "7BIT" 4 1) '
+                        b'("IMAGE" "PNG" NIL NIL NIL "BASE64" 8 NIL '
+                        b'("ATTACHMENT" ("FILENAME" "chart.png")))) "RELATED" '
+                        b'BODY[HEADER] {160}'
+                    )
+                    return "OK", [(metadata, header), (b" BODY[TEXT]<0> {4}", b"body")]
+
+                def logout(self):
+                    pass
+
+            def fake_run(command, **kwargs):
+                if command[0] == "git":
+                    return subprocess.CompletedProcess(command, 1, "", "")
+                return subprocess.CompletedProcess(command, 0, "client-password\n", "")
+
+            previous = Path.cwd()
+            output = io.StringIO()
+            try:
+                os.chdir(project)
+                with (
+                    mock.patch.object(module.subprocess, "run", side_effect=fake_run),
+                    mock.patch.object(module.imaplib, "IMAP4_SSL", FakeImap),
+                    redirect_stdout(output),
+                ):
+                    exit_code = module.main(["search", "--has-attachment"])
+            finally:
+                os.chdir(previous)
+
+            result = json.loads(output.getvalue())
+            self.assertEqual(exit_code, 0, result)
+            self.assertEqual([item["uid"] for item in result["items"]], [9])
+            self.assertIn("BODYSTRUCTURE", fetch_queries[0][2])
+
     def test_get_normalizes_body_and_lists_attachments_without_remote_loading(self) -> None:
         with tempfile.TemporaryDirectory(prefix="mailctl-project-") as directory:
             project = Path(directory)
@@ -551,7 +658,7 @@ class MailctlCliTests(unittest.TestCase):
             self.assertEqual(saved.name, "report.pdf")
             self.assertEqual(saved.read_bytes(), b"PDFDATA")
 
-    def test_prepare_creates_immutable_html_and_plain_text_draft(self) -> None:
+    def test_prepare_creates_immutable_html_and_plain_text_prepared_draft(self) -> None:
         with tempfile.TemporaryDirectory(prefix="mailctl-project-") as directory:
             project = Path(directory)
             initialized = run_mailctl(
@@ -614,6 +721,8 @@ class MailctlCliTests(unittest.TestCase):
             self.assertIn("<table", shown_payload["html"])
 
             eml.write_bytes(eml.read_bytes() + b"tampered")
+            state["content_sha256"] = hashlib.sha256(eml.read_bytes()).hexdigest()
+            (draft_dir / "state.json").write_text(json.dumps(state))
             rejected = run_mailctl(project, "draft", "show", "--draft-id", payload["draft_id"])
             self.assertEqual(rejected.returncode, 2)
             self.assertEqual(json.loads(rejected.stdout)["category"], "draft-integrity")
@@ -704,7 +813,7 @@ class MailctlCliTests(unittest.TestCase):
             self.assertEqual(json.loads(second_output.getvalue())["category"], "draft-locked")
             self.assertEqual(sum(event[0] == "send" for event in events), 1)
 
-    def test_send_timeout_locks_draft_as_uncertain_without_retry(self) -> None:
+    def test_send_timeout_locks_prepared_draft_as_uncertain_send(self) -> None:
         with tempfile.TemporaryDirectory(prefix="mailctl-project-") as directory:
             project = Path(directory)
             self.assertEqual(
@@ -760,6 +869,74 @@ class MailctlCliTests(unittest.TestCase):
             self.assertEqual(json.loads(output.getvalue())["category"], "uncertain-send")
             state_path = project / ".mailctl" / "drafts" / prepared["draft_id"] / "state.json"
             self.assertEqual(json.loads(state_path.read_text())["status"], "uncertain")
+            self.assertEqual(attempts, 1)
+
+    def test_send_stays_consumed_when_smtp_disconnects_after_acceptance(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="mailctl-project-") as directory:
+            project = Path(directory)
+            self.assertEqual(
+                run_mailctl(project, "init", "--email", "owner@example.com").returncode,
+                0,
+            )
+            manifest = project / "message.md"
+            manifest.write_text(
+                "---\naccount: default\nto:\n  - alice@example.com\ncc: []\n"
+                "subject: Accepted\nreply_to: null\n---\n\nReady.\n"
+            )
+            prepared = json.loads(
+                run_mailctl(project, "prepare", "--file", str(manifest)).stdout
+            )
+            module = load_mailctl_module()
+            attempts = 0
+
+            class DisconnectOnExitSmtp:
+                def __init__(self, *args, **kwargs):
+                    pass
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *args):
+                    raise module.smtplib.SMTPServerDisconnected("QUIT response lost")
+
+                def quit(self):
+                    raise module.smtplib.SMTPServerDisconnected("QUIT response lost")
+
+                def close(self):
+                    pass
+
+                def login(self, address, password):
+                    pass
+
+                def send_message(self, message):
+                    nonlocal attempts
+                    attempts += 1
+                    return {}
+
+            def fake_run(command, **kwargs):
+                if command[0] == "git":
+                    return subprocess.CompletedProcess(command, 1, "", "")
+                return subprocess.CompletedProcess(command, 0, "client-password\n", "")
+
+            previous = Path.cwd()
+            output = io.StringIO()
+            try:
+                os.chdir(project)
+                with (
+                    mock.patch.object(module.subprocess, "run", side_effect=fake_run),
+                    mock.patch.object(
+                        module.smtplib, "SMTP_SSL", DisconnectOnExitSmtp
+                    ),
+                    redirect_stdout(output),
+                ):
+                    exit_code = module.main(
+                        ["send", "--draft-id", prepared["draft_id"]]
+                    )
+            finally:
+                os.chdir(previous)
+
+            self.assertEqual(exit_code, 0, output.getvalue())
+            self.assertEqual(json.loads(output.getvalue())["status"], "consumed")
             self.assertEqual(attempts, 1)
 
     def test_prepare_reply_all_preserves_thread_and_excludes_own_address(self) -> None:
@@ -840,7 +1017,7 @@ class MailctlCliTests(unittest.TestCase):
                 "<older@example.com> <original@example.com>",
             )
 
-    def test_prepare_prunes_drafts_older_than_thirty_days(self) -> None:
+    def test_prepare_prunes_prepared_drafts_older_than_thirty_days(self) -> None:
         with tempfile.TemporaryDirectory(prefix="mailctl-project-") as directory:
             project = Path(directory)
             self.assertEqual(

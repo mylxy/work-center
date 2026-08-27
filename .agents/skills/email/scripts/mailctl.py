@@ -114,7 +114,10 @@ def command_init(args: argparse.Namespace) -> dict[str, object]:
             "",
         )
     )
-    (state / "config.toml").write_text(config)
+    config_path = state / "config.toml"
+    config_path.write_text(config)
+    os.chmod(state / ".gitignore", 0o600)
+    os.chmod(config_path, 0o600)
     return {"status": "initialized", "project": str(project), "state_dir": str(state)}
 
 
@@ -188,7 +191,10 @@ def command_doctor(args: argparse.Namespace) -> dict[str, object]:
             ssl_context=context,
             timeout=30,
         )
-        imap.login(address, password)
+        try:
+            imap.login(address, password)
+        except imaplib.IMAP4.error as error:
+            raise MailctlError("authentication", "IMAP authentication failed") from error
         _, capabilities = imap.capability()
         imap.logout()
         with smtplib.SMTP_SSL(
@@ -197,7 +203,10 @@ def command_doctor(args: argparse.Namespace) -> dict[str, object]:
             context=context,
             timeout=30,
         ) as smtp:
-            smtp.login(address, password)
+            try:
+                smtp.login(address, password)
+            except smtplib.SMTPAuthenticationError as error:
+                raise MailctlError("authentication", "SMTP authentication failed") from error
             code, _ = smtp.noop()
             if code != 250:
                 raise MailctlError("capability", f"SMTP NOOP returned {code}")
@@ -256,7 +265,10 @@ class ImapMailbox:
                 ssl_context=context,
                 timeout=30,
             )
-            self.client.login(self.address, password)
+            try:
+                self.client.login(self.address, password)
+            except imaplib.IMAP4.error as error:
+                raise MailctlError("authentication", "IMAP authentication failed") from error
             status, _ = self.client.select(folder, readonly=True)
             if status != "OK":
                 raise MailctlError("permission", f"cannot read mailbox folder {folder}")
@@ -298,7 +310,7 @@ class ImapMailbox:
         status, data = self.client.uid(
             "FETCH",
             str(uid),
-            "(INTERNALDATE BODY.PEEK[HEADER] BODY.PEEK[TEXT]<0.1024>)",
+            "(INTERNALDATE BODYSTRUCTURE BODY.PEEK[HEADER] BODY.PEEK[TEXT]<0.1024>)",
         )
         if status != "OK":
             raise MailctlError("connection", f"IMAP fetch failed for UID {uid}")
@@ -322,6 +334,9 @@ class ImapMailbox:
             received = ""
         addresses = lambda name: [addr for _, addr in getaddresses(message.get_all(name, [])) if addr]
         content_type = str(message.get("Content-Type", "")).lower()
+        bodystructure_has_attachment = bool(
+            re.search(r'(?i)"ATTACHMENT"\s*\(|"FILENAME"\s', metadata)
+        )
         return {
             "uid": uid,
             "message_id": str(message.get("Message-ID", "")),
@@ -331,7 +346,8 @@ class ImapMailbox:
             "cc": addresses("Cc"),
             "subject": str(message.get("Subject", "")),
             "snippet": text_bytes.decode("utf-8", "replace").strip()[:1024],
-            "has_attachments": "multipart/mixed" in content_type,
+            "has_attachments": bodystructure_has_attachment
+            or "multipart/mixed" in content_type,
         }
 
     def fetch(self, uid: int) -> bytes:
@@ -578,16 +594,18 @@ def message_content(raw: bytes, include_html: bool) -> dict[str, object]:
     return result
 
 
-def command_get(args: argparse.Namespace) -> dict[str, object]:
-    project = Path.cwd()
-    ensure_state_is_untracked(project)
-    reference = decode_token(args.message_ref, "message reference")
+def fetch_referenced_message(
+    project: Path,
+    message_ref: str,
+) -> tuple[dict[str, Any], bytes, EmailMessage]:
+    reference = decode_token(message_ref, "message reference")
     try:
         folder = str(reference["folder"])
         expected_validity = int(reference["uidvalidity"])
         uid = int(reference["uid"])
     except (KeyError, TypeError, ValueError) as error:
         raise MailctlError("invalid-input", "invalid message reference") from error
+
     def perform() -> bytes:
         with open_mailbox(project, folder) as mailbox:
             if mailbox.uidvalidity != expected_validity:
@@ -595,16 +613,24 @@ def command_get(args: argparse.Namespace) -> dict[str, object]:
             return mailbox.fetch(uid)
 
     raw = retry_read(perform)
-    result = message_content(raw, args.include_html)
+    message = BytesParser(policy=policy.default).parsebytes(raw)
     expected_message_id = str(reference.get("message_id", ""))
-    if expected_message_id and result["message_id"] != expected_message_id:
+    if expected_message_id and str(message.get("Message-ID", "")) != expected_message_id:
         raise MailctlError("stale-reference", "message identity no longer matches; search again")
+    return reference, raw, message
+
+
+def command_get(args: argparse.Namespace) -> dict[str, object]:
+    project = Path.cwd()
+    ensure_state_is_untracked(project)
+    reference, raw, _ = fetch_referenced_message(project, args.message_ref)
+    result = message_content(raw, args.include_html)
     result.update(
         {
             "status": "ok",
-            "folder": folder,
-            "uidvalidity": expected_validity,
-            "uid": uid,
+            "folder": reference["folder"],
+            "uidvalidity": reference["uidvalidity"],
+            "uid": reference["uid"],
             "message_ref": args.message_ref,
         }
     )
@@ -645,25 +671,11 @@ def unique_output_path(directory: Path, filename: str) -> Path:
 def command_attachment_get(args: argparse.Namespace) -> dict[str, object]:
     project = Path.cwd()
     ensure_state_is_untracked(project)
-    reference = decode_token(args.message_ref, "message reference")
     try:
-        folder = str(reference["folder"])
-        expected_validity = int(reference["uidvalidity"])
-        uid = int(reference["uid"])
         part_id = int(args.part_id)
-    except (KeyError, TypeError, ValueError) as error:
-        raise MailctlError("invalid-input", "invalid message reference or part ID") from error
-    def perform() -> bytes:
-        with open_mailbox(project, folder) as mailbox:
-            if mailbox.uidvalidity != expected_validity:
-                raise MailctlError("stale-reference", "mailbox UIDVALIDITY changed; search again")
-            return mailbox.fetch(uid)
-
-    raw = retry_read(perform)
-    message = BytesParser(policy=policy.default).parsebytes(raw)
-    expected_message_id = str(reference.get("message_id", ""))
-    if expected_message_id and str(message.get("Message-ID", "")) != expected_message_id:
-        raise MailctlError("stale-reference", "message identity no longer matches; search again")
+    except ValueError as error:
+        raise MailctlError("invalid-input", "invalid attachment part ID") from error
+    _, _, message = fetch_referenced_message(project, args.message_ref)
     parts = list(message.walk())
     if part_id < 0 or part_id >= len(parts):
         raise MailctlError("invalid-input", "attachment part does not exist")
@@ -946,24 +958,10 @@ def resolve_reply(
 ) -> tuple[list[str], list[str], str, str]:
     if mode not in {"reply", "reply-all"}:
         raise MailctlError("invalid-input", "reply_mode must be reply or reply-all")
-    reference = decode_token(message_ref, "message reference")
-    try:
-        folder = str(reference["folder"])
-        expected_validity = int(reference["uidvalidity"])
-        uid = int(reference["uid"])
-    except (KeyError, TypeError, ValueError) as error:
-        raise MailctlError("invalid-input", "invalid reply message reference") from error
-    def perform() -> bytes:
-        with open_mailbox(project, folder) as mailbox:
-            if mailbox.uidvalidity != expected_validity:
-                raise MailctlError("stale-reference", "mailbox UIDVALIDITY changed; search again")
-            return mailbox.fetch(uid)
-
-    original = BytesParser(policy=policy.default).parsebytes(retry_read(perform))
+    _, _, original = fetch_referenced_message(project, message_ref)
     message_id = str(original.get("Message-ID", ""))
-    expected_id = str(reference.get("message_id", ""))
-    if not message_id or (expected_id and message_id != expected_id):
-        raise MailctlError("stale-reference", "reply message identity no longer matches")
+    if not message_id:
+        raise MailctlError("stale-reference", "reply message has no Message-ID")
     senders = [addr for _, addr in getaddresses(original.get_all("From", [])) if addr]
     if not senders:
         raise MailctlError("invalid-input", "reply message has no sender")
@@ -1089,7 +1087,11 @@ def load_draft(project: Path, draft_id: str) -> tuple[dict[str, Any], bytes, Pat
         raise MailctlError("draft-not-found", "Prepared Draft does not exist") from error
     if not isinstance(state, dict) or state.get("draft_id") != draft_id:
         raise MailctlError("draft-integrity", "Prepared Draft state is invalid")
-    if hashlib.sha256(raw).hexdigest() != state.get("content_sha256"):
+    content_digest = hashlib.sha256(raw).hexdigest()
+    if (
+        content_digest != state.get("content_sha256")
+        or not content_digest.startswith(draft_id)
+    ):
         raise MailctlError("draft-integrity", "Prepared Draft MIME content has changed")
     return state, raw, draft_dir
 
@@ -1125,7 +1127,7 @@ def save_draft_state(draft_dir: Path, state: dict[str, Any]) -> None:
     temporary.replace(destination)
 
 
-def lock_uncertain_draft(
+def lock_uncertain_send(
     draft_dir: Path,
     state: dict[str, Any],
     message: str,
@@ -1160,6 +1162,7 @@ def command_send(args: argparse.Namespace) -> dict[str, object]:
     password = read_keychain_password(address)
     message = BytesParser(policy=policy.default).parsebytes(raw)
     context = ssl.create_default_context()
+    smtp: smtplib.SMTP_SSL | None = None
     try:
         smtp = smtplib.SMTP_SSL(
             str(account["smtp_host"]),
@@ -1167,33 +1170,43 @@ def command_send(args: argparse.Namespace) -> dict[str, object]:
             context=context,
             timeout=30,
         )
-        with smtp:
-            smtp.login(address, password)
-            try:
-                refused = smtp.send_message(message)
-            except smtplib.SMTPResponseException as error:
-                raise MailctlError(
-                    "send-failed",
-                    f"SMTP rejected the message with code {error.smtp_code}",
-                ) from error
-            except (TimeoutError, OSError, smtplib.SMTPServerDisconnected) as error:
-                lock_uncertain_draft(
-                    draft_dir,
-                    state,
-                    f"SMTP result is uncertain after transport failure: {error}",
-                )
-            if refused:
-                lock_uncertain_draft(
-                    draft_dir,
-                    state,
-                    "SMTP may have accepted only some recipients; the draft is locked",
-                )
+        smtp.login(address, password)
+        try:
+            refused = smtp.send_message(message)
+        except smtplib.SMTPRecipientsRefused as error:
+            raise MailctlError("send-failed", "SMTP rejected every recipient") from error
+        except smtplib.SMTPResponseException as error:
+            raise MailctlError(
+                "send-failed",
+                f"SMTP rejected the message with code {error.smtp_code}",
+            ) from error
+        except (TimeoutError, OSError, smtplib.SMTPServerDisconnected) as error:
+            lock_uncertain_send(
+                draft_dir,
+                state,
+                f"SMTP transport failed after sending began; this is an Uncertain Send: {error}",
+            )
+        if refused:
+            lock_uncertain_send(
+                draft_dir,
+                state,
+                "SMTP may have accepted only some recipients; the Prepared Draft is locked",
+            )
     except MailctlError:
         raise
     except smtplib.SMTPAuthenticationError as error:
         raise MailctlError("authentication", "SMTP authentication failed") from error
     except (KeyError, OSError, smtplib.SMTPException) as error:
         raise MailctlError("connection", f"SMTP connection failed before sending: {error}") from error
+    finally:
+        if smtp is not None:
+            try:
+                smtp.quit()
+            except (AttributeError, OSError, smtplib.SMTPException):
+                try:
+                    smtp.close()
+                except (AttributeError, OSError, smtplib.SMTPException):
+                    pass
     state["status"] = "consumed"
     state["sent_at"] = datetime.now(timezone.utc).isoformat()
     save_draft_state(draft_dir, state)
