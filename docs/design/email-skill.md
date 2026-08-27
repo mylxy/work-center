@@ -13,6 +13,7 @@ The user wants Codex to read and send Alibaba Mail without routine webmail login
 - Install the skill with the repository's symlink pattern and keep the repository copy authoritative.
 - Use IMAP over TLS on port 993 and SMTP over TLS on port 465. The first version has one `default` Mailbox Account and fixes `From` to that account.
 - Store the third-party client security password only in macOS Keychain. Never accept it through arguments, environment variables, config files, prompts, or output.
+- Run `auth setup` in one reusable PTY and attach that exact session to the visible integrated terminal. Before requesting password input, verify that the visible terminal contains the full command and Keychain password prompt. If attachment or session lifetime fails, provide the absolute command for the user to run manually instead of reporting that the hidden process is waiting.
 
 ## Calling Project boundary
 

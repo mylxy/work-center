@@ -24,6 +24,13 @@ REQUIRED_INSTRUCTIONS = (
     "不得在准备草稿的同一轮调用 `send`",
     "不得重试发送",
 )
+AUTH_TERMINAL_INSTRUCTIONS = (
+    "`open_in_codex`",
+    "`read_thread_terminal`",
+    "password data for new item:",
+    "会话失效",
+    "完整绝对命令",
+)
 
 
 def validate_skill(skill_dir: Path) -> list[str]:
@@ -83,6 +90,11 @@ def validate_skill(skill_dir: Path) -> list[str]:
     for instruction in REQUIRED_INSTRUCTIONS:
         if instruction not in skill_text:
             errors.append(f"SKILL.md is missing required instruction: {instruction}")
+    for instruction in AUTH_TERMINAL_INSTRUCTIONS:
+        if instruction not in skill_text:
+            errors.append(
+                f"SKILL.md is missing authentication terminal instruction: {instruction}"
+            )
 
     package_text = "\n".join(
         path.read_text(errors="replace")

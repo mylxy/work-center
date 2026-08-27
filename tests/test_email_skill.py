@@ -1,4 +1,5 @@
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -29,6 +30,23 @@ class EmailSkillPackageTests(unittest.TestCase):
             text=True,
         )
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+
+    def test_auth_setup_requires_a_verified_visible_terminal_handoff(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="email-skill-auth-terminal-") as directory:
+            skill = Path(directory) / "email"
+            shutil.copytree(SKILL, skill)
+            skill_file = skill / "SKILL.md"
+            skill_file.write_text(
+                skill_file.read_text().replace("`read_thread_terminal`", "terminal reader")
+            )
+
+            errors = validate_skill(skill)
+
+        self.assertIn(
+            "SKILL.md is missing authentication terminal instruction: "
+            "`read_thread_terminal`",
+            errors,
+        )
 
     def test_installer_creates_idempotent_authoritative_symlink(self) -> None:
         with tempfile.TemporaryDirectory(prefix="email-skill-install-") as directory:
