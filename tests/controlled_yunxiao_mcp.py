@@ -46,6 +46,18 @@ ACTIVITIES = [
         "createdAt": "2026-08-25T09:00:00Z",
     },
 ]
+WORKFLOW = {
+    "statuses": [
+        {"id": "status-pending", "name": "待处理"},
+        {"id": "status-processing", "name": "处理中"},
+        {"id": "status-done", "name": "已完成"},
+    ]
+}
+CURRENT_USER = {
+    "id": "user-controlled",
+    "name": "执行用户",
+    "organizationId": "org-controlled",
+}
 ERROR_RESULTS = {
     "unauthenticated": {
         "content": [
@@ -88,6 +100,16 @@ def parse_args() -> argparse.Namespace:
             "unauthenticated",
             "permission-denied",
             "missing-tool",
+            "status-preview",
+            "status-zero-match",
+            "status-multiple-match",
+            "status-host-approval-required",
+            "status-workflow-rejected",
+            "status-role-rejected",
+            "status-permission-rejected",
+            "status-required-field-rejected",
+            "status-transport-uncertain",
+            "status-direct-success",
         ),
         default="success",
     )
@@ -133,6 +155,30 @@ def identity_tool_definition() -> dict:
         },
         "annotations": {
             "title": "Get Current User",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+    }
+
+
+def workflow_tool_definition() -> dict:
+    return {
+        "name": "get_work_item_workflow",
+        "description": "Read the workflow for one Work Item project and type.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "organizationId": {"type": "string"},
+                "projectId": {"type": "string"},
+                "workItemType": {"type": "string"},
+            },
+            "required": ["organizationId", "projectId", "workItemType"],
+            "additionalProperties": False,
+        },
+        "annotations": {
+            "title": "Get Work Item Workflow",
             "readOnlyHint": True,
             "destructiveHint": False,
             "idempotentHint": True,
@@ -235,6 +281,30 @@ def write_tool_definition(name: str, title: str) -> dict:
     }
 
 
+def update_tool_definition() -> dict:
+    return {
+        "name": "update_work_item",
+        "description": "Update the Status of exactly one Work Item by Status ID.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "organizationId": {"type": "string"},
+                "workItemId": {"type": "string"},
+                "statusId": {"type": "string"},
+            },
+            "required": ["organizationId", "workItemId", "statusId"],
+            "additionalProperties": False,
+        },
+        "annotations": {
+            "title": "Update Work Item Status",
+            "readOnlyHint": False,
+            "destructiveHint": True,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+    }
+
+
 def success_result(data: dict) -> dict:
     return {
         "content": [
@@ -289,7 +359,12 @@ def search_results(scenario: str) -> list[dict]:
     ]
 
 
-def tool_result(scenario: str, name: str, arguments: dict) -> dict:
+def tool_result(
+    scenario: str,
+    name: str,
+    arguments: dict,
+    state: dict,
+) -> dict:
     if name == "get_work_item" and scenario in ERROR_RESULTS:
         return ERROR_RESULTS[scenario]
     if name == "search_workitems":
@@ -307,17 +382,103 @@ def tool_result(scenario: str, name: str, arguments: dict) -> dict:
         return success_result({"comments": COMMENTS})
     if name == "list_workitem_activities":
         return success_result({"activities": ACTIVITIES})
+    if name == "get_current_user":
+        return success_result(CURRENT_USER)
+    if name == "get_work_item_workflow":
+        if scenario == "status-multiple-match":
+            return success_result(
+                {
+                    "statuses": [
+                        *WORKFLOW["statuses"],
+                        {"id": "status-done-duplicate", "name": "已完成"},
+                    ]
+                }
+            )
+        return success_result(WORKFLOW)
+    if name == "update_work_item" and scenario in {
+        "status-direct-success",
+        "status-host-approval-required",
+    }:
+        if arguments.get("statusId") != "status-done":
+            return {
+                "content": [{"type": "text", "text": "INVALID_STATUS_ID"}],
+                "isError": True,
+            }
+        state["status_updated"] = True
+        return success_result({"id": WORK_ITEM["id"], "statusId": "status-done"})
+    if name == "update_work_item" and scenario == "status-workflow-rejected":
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        "WORKFLOW_RESTRICTION: transition from status-processing "
+                        "to status-done is not allowed"
+                    ),
+                }
+            ],
+            "isError": True,
+        }
+    if name == "update_work_item" and scenario == "status-role-rejected":
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": "ROLE_RESTRICTION: Resolver role is required",
+                }
+            ],
+            "isError": True,
+        }
+    if name == "update_work_item" and scenario == "status-permission-rejected":
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": "PERMISSION_DENIED: no update access to this Work Item",
+                }
+            ],
+            "isError": True,
+        }
+    if name == "update_work_item" and scenario == "status-required-field-rejected":
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": "REQUIRED_FIELD: resolution must be set before this transition",
+                }
+            ],
+            "isError": True,
+        }
+    if name == "update_work_item" and scenario == "status-transport-uncertain":
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        "TRANSPORT_UNCERTAIN: connection dropped after request dispatch"
+                    ),
+                }
+            ],
+            "isError": True,
+        }
     if name in {"update_work_item", "create_work_item_comment"}:
         return {
             "content": [{"type": "text", "text": "WRITE_TRAP_CALLED"}],
             "isError": True,
         }
-    return success_result(WORK_ITEM)
+    work_item = dict(WORK_ITEM)
+    if scenario in {
+        "status-direct-success",
+        "status-host-approval-required",
+    } and state.get("status_updated"):
+        work_item["status"] = {"id": "status-done", "name": "已完成"}
+    return success_result(work_item)
 
 
 def main() -> None:
     args = parse_args()
     log_path = Path(args.log)
+    state = {"status_updated": False}
 
     for line in sys.stdin:
         message = json.loads(line)
@@ -346,11 +507,13 @@ def main() -> None:
                 [identity_tool_definition()]
                 if args.scenario == "missing-tool"
                 else [
+                    identity_tool_definition(),
                     tool_definition(),
                     search_tool_definition(),
                     comments_tool_definition(),
                     activities_tool_definition(),
-                    write_tool_definition("update_work_item", "Update Work Item"),
+                    workflow_tool_definition(),
+                    update_tool_definition(),
                     write_tool_definition(
                         "create_work_item_comment",
                         "Create Work Item Comment",
@@ -377,6 +540,7 @@ def main() -> None:
                         args.scenario,
                         message["params"]["name"],
                         message["params"].get("arguments", {}),
+                        state,
                     ),
                 }
             )

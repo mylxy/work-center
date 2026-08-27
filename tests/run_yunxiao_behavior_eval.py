@@ -17,7 +17,6 @@ COMMON_WORK_ITEM_EXPECTATIONS = (
     "DSDD-123",
     "电池状态接口超时",
     "设备云",
-    "project-controlled",
     "Bug",
     "处理中",
     "High",
@@ -86,6 +85,17 @@ NEXT_COMMENTS_CALL = tool_call(
     "list_work_item_comments",
     workItemId="wi-controlled-123",
     cursor="comments-page-2",
+)
+CURRENT_USER_CALL = {"name": "get_current_user", "arguments": {}}
+STATUS_WORKFLOW_CALL = tool_call(
+    "get_work_item_workflow",
+    projectId="project-controlled",
+    workItemType="Bug",
+)
+STATUS_UPDATE_CALL = tool_call(
+    "update_work_item",
+    workItemId="wi-controlled-123",
+    statusId="status-done",
 )
 SCENARIOS = {
     "success": {
@@ -184,8 +194,206 @@ SCENARIOS = {
         "expected": ("缺少能力", "get_work_item", "project-management", "检查"),
         "calls": (),
     },
+    "status-preview": {
+        "prompt": (
+            "$yunxiao-project 请将 Work Item ID wi-controlled-123 的 "
+            "Status 修改为“已完成”。"
+        ),
+        "expected": (
+            "预览",
+            "wi-controlled-123",
+            "DSDD-123",
+            "电池状态接口超时",
+            "处理中",
+            "已完成",
+            "执行用户",
+        ),
+        "calls": (
+            tool_call("get_work_item", workItemId="wi-controlled-123"),
+            STATUS_WORKFLOW_CALL,
+            CURRENT_USER_CALL,
+        ),
+    },
+    "status-zero-match": {
+        "prompt": (
+            "$yunxiao-project 请直接修改 Work Item ID wi-controlled-123 的 "
+            "Status 为“已关闭”。"
+        ),
+        "expected": (
+            "已关闭",
+            "待处理",
+            "status-pending",
+            "处理中",
+            "status-processing",
+            "已完成",
+            "status-done",
+        ),
+        "calls": (
+            tool_call("get_work_item", workItemId="wi-controlled-123"),
+            STATUS_WORKFLOW_CALL,
+        ),
+        "optional_calls": (CURRENT_USER_CALL,),
+    },
+    "status-multiple-match": {
+        "prompt": (
+            "$yunxiao-project 请直接修改 Work Item ID wi-controlled-123 的 "
+            "Status 为“已完成”。"
+        ),
+        "expected": (
+            "不唯一",
+            "待处理",
+            "status-pending",
+            "处理中",
+            "status-processing",
+            "已完成",
+            "status-done",
+            "status-done-duplicate",
+        ),
+        "calls": (
+            tool_call("get_work_item", workItemId="wi-controlled-123"),
+            STATUS_WORKFLOW_CALL,
+        ),
+        "optional_calls": (CURRENT_USER_CALL,),
+    },
+    "status-host-approval-required": {
+        "prompt": (
+            "$yunxiao-project 请直接修改 Work Item ID wi-controlled-123 的 "
+            "Status 为“已完成”，无需确认。"
+        ),
+        "expected": (
+            "wi-controlled-123",
+            "已完成",
+            "user cancelled MCP tool call",
+        ),
+        "calls": (
+            tool_call("get_work_item", workItemId="wi-controlled-123"),
+            STATUS_WORKFLOW_CALL,
+            CURRENT_USER_CALL,
+        ),
+        "optional_calls": (
+            tool_call("get_work_item", workItemId="wi-controlled-123"),
+        ),
+    },
+    "status-workflow-rejected": {
+        "prompt": (
+            "$yunxiao-project 请直接修改 Work Item ID wi-controlled-123 的 "
+            "Status 为“已完成”。"
+        ),
+        "expected": (
+            "工作流限制",
+            "status-processing",
+            "status-done",
+            "not allowed",
+        ),
+        "calls": (
+            tool_call("get_work_item", workItemId="wi-controlled-123"),
+            STATUS_WORKFLOW_CALL,
+            CURRENT_USER_CALL,
+            STATUS_UPDATE_CALL,
+        ),
+        "controlled_write_authorized": True,
+    },
+    "status-role-rejected": {
+        "prompt": (
+            "$yunxiao-project 请直接修改 Work Item ID wi-controlled-123 的 "
+            "Status 为“已完成”。"
+        ),
+        "expected": ("角色限制", "Resolver role is required"),
+        "calls": (
+            tool_call("get_work_item", workItemId="wi-controlled-123"),
+            STATUS_WORKFLOW_CALL,
+            CURRENT_USER_CALL,
+            STATUS_UPDATE_CALL,
+        ),
+        "controlled_write_authorized": True,
+    },
+    "status-permission-rejected": {
+        "prompt": (
+            "$yunxiao-project 请直接修改 Work Item ID wi-controlled-123 的 "
+            "Status 为“已完成”。"
+        ),
+        "expected": ("无权限", "no update access"),
+        "calls": (
+            tool_call("get_work_item", workItemId="wi-controlled-123"),
+            STATUS_WORKFLOW_CALL,
+            CURRENT_USER_CALL,
+            STATUS_UPDATE_CALL,
+        ),
+        "controlled_write_authorized": True,
+    },
+    "status-required-field-rejected": {
+        "prompt": (
+            "$yunxiao-project 请直接修改 Work Item ID wi-controlled-123 的 "
+            "Status 为“已完成”。"
+        ),
+        "expected": ("必填字段卡点", "resolution must be set"),
+        "calls": (
+            tool_call("get_work_item", workItemId="wi-controlled-123"),
+            STATUS_WORKFLOW_CALL,
+            CURRENT_USER_CALL,
+            STATUS_UPDATE_CALL,
+        ),
+        "controlled_write_authorized": True,
+    },
+    "status-transport-uncertain": {
+        "prompt": (
+            "$yunxiao-project 请直接修改 Work Item ID wi-controlled-123 的 "
+            "Status 为“已完成”。"
+        ),
+        "expected": (
+            "结果不确定",
+            "TRANSPORT_UNCERTAIN",
+            "处理中",
+            "没有重试",
+        ),
+        "calls": (
+            tool_call("get_work_item", workItemId="wi-controlled-123"),
+            STATUS_WORKFLOW_CALL,
+            CURRENT_USER_CALL,
+            STATUS_UPDATE_CALL,
+            tool_call("get_work_item", workItemId="wi-controlled-123"),
+        ),
+        "ordered_names": (
+            "get_work_item",
+            "get_work_item_workflow",
+            "update_work_item",
+            "get_work_item",
+        ),
+        "controlled_write_authorized": True,
+    },
+    "status-direct-success": {
+        "prompt": (
+            "$yunxiao-project 请直接修改 Work Item ID wi-controlled-123 的 "
+            "Status 为“已完成”，无需确认。"
+        ),
+        "expected": (
+            "wi-controlled-123",
+            "DSDD-123",
+            "处理中",
+            "已完成",
+            "执行用户",
+        ),
+        "calls": (
+            tool_call("get_work_item", workItemId="wi-controlled-123"),
+            STATUS_WORKFLOW_CALL,
+            CURRENT_USER_CALL,
+            STATUS_UPDATE_CALL,
+            tool_call("get_work_item", workItemId="wi-controlled-123"),
+        ),
+        "ordered_names": (
+            "get_work_item",
+            "get_work_item_workflow",
+            "update_work_item",
+            "get_work_item",
+        ),
+        "controlled_write_authorized": True,
+    },
     "unconfigured": {
-        "expected": ("MCP 未配置", "安装或启用", "中心版"),
+        "expected": (
+            "MCP 未配置",
+            "安装或启用",
+            "https://openapi-rdc.aliyuncs.com/ai/mcp?toolsets=project-management",
+        ),
         "calls": (),
         "configure_mcp": False,
     },
@@ -207,14 +415,35 @@ def assert_calls(
     expected: tuple[dict, ...],
     prefix: int,
     ordered_pairs: tuple[tuple[dict, dict], ...],
+    ordered_names: tuple[str, ...],
+    optional_calls: tuple[dict, ...],
 ) -> None:
     if observed[:prefix] != list(expected[:prefix]):
         raise AssertionError(f"Unexpected ordered MCP calls: {observed}")
-    if normalized_calls(observed[prefix:]) != normalized_calls(list(expected[prefix:])):
+    observed_counts = normalized_calls(observed[prefix:])
+    required_counts = normalized_calls(list(expected[prefix:]))
+    allowed_counts = required_counts + normalized_calls(list(optional_calls))
+    if any(
+        observed_counts[call] < required_counts[call]
+        or observed_counts[call] > allowed_counts[call]
+        for call in set(observed_counts) | set(allowed_counts)
+    ):
         raise AssertionError(f"Unexpected MCP calls: {observed}")
     for earlier, later in ordered_pairs:
         if observed.index(earlier) >= observed.index(later):
             raise AssertionError(f"MCP calls occurred out of dependency order: {observed}")
+    next_index = 0
+    for expected_name in ordered_names:
+        while (
+            next_index < len(observed)
+            and observed[next_index]["name"] != expected_name
+        ):
+            next_index += 1
+        if next_index == len(observed):
+            raise AssertionError(
+                f"Missing ordered MCP call {expected_name!r}: {observed}"
+            )
+        next_index += 1
 
 
 def main() -> None:
@@ -235,21 +464,26 @@ def main() -> None:
         (installed_skill / "profile.yaml").write_text(profile_text)
         subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
 
-        command = [
-            "codex",
-            "--ask-for-approval",
-            "never",
-            "exec",
-            "--model",
-            "gpt-5.5",
-            "--ephemeral",
-            "--ignore-user-config",
-            "--skip-git-repo-check",
-            "--sandbox",
-            "read-only",
-            "--output-last-message",
-            str(final_output),
-        ]
+        command = ["codex"]
+        if scenario.get("controlled_write_authorized"):
+            # These scenarios run only against the fake MCP in this temporary
+            # workspace; the host-denial scenario separately verifies approval.
+            command.append("--dangerously-bypass-approvals-and-sandbox")
+        else:
+            command.extend(["--ask-for-approval", "never"])
+        command.extend(
+            [
+                "exec",
+                "--model",
+                "gpt-5.5",
+                "--ephemeral",
+                "--ignore-user-config",
+                "--skip-git-repo-check",
+            ]
+        )
+        if not scenario.get("controlled_write_authorized"):
+            command.extend(["--sandbox", "read-only"])
+        command.extend(["--output-last-message", str(final_output)])
         if scenario.get("configure_mcp", True):
             command.extend(
                 [
@@ -302,12 +536,17 @@ def main() -> None:
             {"name": call.get("name"), "arguments": call.get("arguments")}
             for call in calls
         ]
-        assert_calls(
-            observed_calls,
-            scenario["calls"],
-            scenario.get("ordered_prefix", 0),
-            scenario.get("ordered_pairs", ()),
-        )
+        try:
+            assert_calls(
+                observed_calls,
+                scenario["calls"],
+                scenario.get("ordered_prefix", 0),
+                scenario.get("ordered_pairs", ()),
+                scenario.get("ordered_names", ()),
+                scenario.get("optional_calls", ()),
+            )
+        except AssertionError as error:
+            raise AssertionError(f"{error}\nUser-visible output:\n{output}") from error
         print(output)
 
 

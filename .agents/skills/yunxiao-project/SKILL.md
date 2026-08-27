@@ -1,20 +1,20 @@
 ---
 name: yunxiao-project
-description: Use only when the user explicitly invokes $yunxiao-project; safely resolve one Yunxiao Work Item URL, ID, or project-scoped Number and return a read-only compact or full view through the official hosted MCP.
+description: Use only when the user explicitly invokes $yunxiao-project; safely resolve one Yunxiao Work Item URL, ID, or project-scoped Number, then read it or transition its Status through the official hosted MCP.
 metadata:
   disable-model-invocation: true
 ---
 
 # YunXiaoProject
 
-通过阿里云官方托管的云效 MCP，以当前用户的 OAuth 身份精确定位并读取一个 Work Item。支持 Work Item URL、Work Item ID 和限定在一个明确项目内的 Work Item Number，并保持全程只读。
+通过阿里云官方托管的云效 MCP，以当前用户的 OAuth 身份精确定位一个 Work Item，读取其详情，或安全流转其 Status。支持 Work Item URL、Work Item ID 和限定在一个明确项目内的 Work Item Number。
 
 ## 执行边界
 
 - 仅使用 `agents/openai.yaml` 声明的 `yunxiao` MCP；运行时只接受中心版托管端点及 `project-management` toolset。
-- 允许的项目管理能力只有 `search_workitems`、`get_work_item`、`list_work_item_comments` 和 `list_workitem_activities`。任何工具调用前先做能力门禁：ID/URL-ID 紧凑视图需要 `get_work_item` 与 `list_work_item_comments`；Number/URL-Number 还需要 `search_workitems`；完整视图还需要 `list_workitem_activities`。本次路径任一能力缺失时立即输出“缺少能力”并保持零工具调用，包括不得调用 `get_current_user` 等基础身份工具。只有能力门禁通过且 organization ID 仍缺失时，才可使用 MCP 自带的基础身份或组织发现工具确定当前身份与 organization ID。不得调用项目搜索或任何写工具。
-- 以 MCP 运行时公布的工具名称和输入 schema 为准。缺少本次读取需要的精确工具时停止，不用相近工具猜测替代。
-- 保持只读。不得更新 Status、创建评论或执行其他变更。
+- 允许的项目管理能力只有 `search_workitems`、`get_work_item`、`get_work_item_workflow`、`list_work_item_comments`、`list_workitem_activities` 和 `update_work_item`。任何工具调用前先做路径级能力门禁：ID/URL-ID 紧凑视图需要 `get_work_item` 与 `list_work_item_comments`；Number/URL-Number 还需要 `search_workitems`；完整视图还需要 `list_workitem_activities`；Status 流转需要 `get_work_item`、`get_work_item_workflow`、`update_work_item` 和 MCP 的当前身份能力。任一必需能力缺失时立即输出“缺少能力”并保持零工具调用。只有能力门禁通过后，才可使用 MCP 的基础身份或组织发现工具确定当前 OAuth 身份与 organization ID。不得调用项目搜索或评论写工具。
+- 以 MCP 运行时公布的工具名称和输入 schema 为准。缺少本次操作需要的精确工具时停止，不用相近工具猜测替代。
+- 读取路径保持只读。Status 流转路径只允许按 [Status 流转](references/status-transition.md) 更新一个 Work Item 的 Status。其他字段与评论保持只读。
 - MCP 是唯一后端。连接失败时按下方错误分类停止，不切换到 CLI、curl、直接 OpenAPI 或浏览器自动化。
 - OAuth 凭证由宿主管理。不得索取、读取、显示或保存 PAT、OAuth token、Authorization header 或其他凭证。
 
@@ -38,6 +38,11 @@ metadata:
 6. 在返回集合中只以 `serialNumber` 与原始 Work Item Number 做精确、完整匹配。恰好一个精确匹配时采用该结果的 Work Item ID；零个或多个精确匹配时停止，不调用 `get_work_item`，也不选择近似项或第一个结果。
 7. 用户没有明确提供 ID、Number 或可安全解析的 URL，或提供多个目标时，请求一个受支持的单一标识并停止。
 8. 不通过试探多个 organization、project 或 Work Item 来推断目标。
+
+## 选择操作
+
+- 用户请求修改 Status 时，读取并严格执行 [Status 流转](references/status-transition.md)。该分支自行读取当前 Work Item；不要先走下方详情读取流程。
+- 其他受支持请求走下方只读流程。
 
 ## 读取 Work Item
 
@@ -71,10 +76,10 @@ metadata:
 
 - **MCP 未配置或不可连接**：服务器未声明、初始化失败、工具发现请求本身失败，或运行时完全没有 `yunxiao` MCP 命名空间时使用。其他 MCP、内置工具或多代理工具的存在不能证明云效 MCP 已连接。指出需要安装或启用声明的 `yunxiao` 托管 MCP，并核对中心版 endpoint；停止。
 - **未认证或认证过期**：要求通过宿主重新完成云效 OAuth 授权；不建议 PAT。
-- **缺少能力**：至少一个属于 `yunxiao` MCP 命名空间的基础工具已暴露，证明云效 MCP 已连接，但本次路径缺少 `search_workitems`、`get_work_item`、`list_work_item_comments` 或 `list_workitem_activities` 中所需能力时使用；不得把其他命名空间的工具当作连接证据。点名缺少的工具，要求检查 `project-management` toolset 或服务端能力；停止。
+- **缺少能力**：至少一个属于 `yunxiao` MCP 命名空间的基础工具已暴露，证明云效 MCP 已连接，但本次路径缺少所需能力时使用；不得把其他命名空间的工具当作连接证据。点名缺少的工具，要求检查 `project-management` toolset 或服务端能力；停止。
 - **配置不足**：点名缺少或无法唯一确定的 organization ID 或 project ID，并只请求该非敏感值。
 - **目标不唯一**：Work Item Number 搜索出现多个 `serialNumber` 精确匹配时，报告匹配数量并要求用户核对项目或提供 Work Item ID；不得选择目标。
 - **无权限**：返回云效的权限错误，并要求为当前 OAuth 身份授予目标 Work Item 的只读权限。
 - **目标不存在或输入无效**：指出该 Work Item ID 未找到或不被接受，不搜索相似目标。
 
-任何成功或失败路径都不得触发真实 Status 更新、评论写入或其他副作用。
+只读路径不得触发副作用。Status 流转路径最多提交一次针对唯一 Work Item 的 Status 更新；任何路径都不得创建评论或修改其他字段。

@@ -1,7 +1,7 @@
 interface:
   display_name: "YunXiaoProject"
-  short_description: "通过云效官方 MCP 精确解析并只读查看单个 Work Item"
-  default_prompt: "使用 $yunxiao-project 读取 Work Item Number DSDD-123。"
+  short_description: "通过云效官方 MCP 精确读取并安全流转单个 Work Item Status"
+  default_prompt: "使用 $yunxiao-project 将 Work Item Number DSDD-123 的 Status 改为已完成。"
 dependencies:
   tools:
     - type: "mcp"
