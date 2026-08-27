@@ -35,6 +35,44 @@ def load_mailctl_module():
     return module
 
 
+class SearchImapStub:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def login(self, address, password):
+        return "OK", []
+
+    def select(self, folder, readonly):
+        return "OK", []
+
+    def response(self, name):
+        return "UIDVALIDITY", [b"7"]
+
+    def logout(self):
+        return "BYE", []
+
+
+def run_search_with_imap(project: Path, module, imap_type, *args: str):
+    def fake_run(command, **kwargs):
+        if command[0] == "git":
+            return subprocess.CompletedProcess(command, 1, "", "")
+        return subprocess.CompletedProcess(command, 0, "<REDACTED>\n", "")
+
+    previous = Path.cwd()
+    output = io.StringIO()
+    try:
+        os.chdir(project)
+        with (
+            mock.patch.object(module.subprocess, "run", side_effect=fake_run),
+            mock.patch.object(module.imaplib, "IMAP4_SSL", imap_type),
+            redirect_stdout(output),
+        ):
+            exit_code = module.main(["search", *args])
+    finally:
+        os.chdir(previous)
+    return exit_code, json.loads(output.getvalue())
+
+
 class MailctlCliTests(unittest.TestCase):
     def test_init_creates_project_local_state_and_config(self) -> None:
         with tempfile.TemporaryDirectory(prefix="mailctl-project-") as directory:
@@ -303,8 +341,148 @@ class MailctlCliTests(unittest.TestCase):
             self.assertEqual(result["items"][0]["uid"], 41)
             self.assertTrue(result["items"][0]["message_ref"])
             self.assertEqual(result["next_cursor"], None)
-            self.assertIn(("FROM", "alice@example.com"), observed["criteria"])
+            self.assertNotIn(("FROM", "alice@example.com"), observed["criteria"])
             self.assertIn(("SINCE", "2026-08-26T00:00:00+08:00"), observed["criteria"])
+
+    def test_search_preserves_exact_sender_and_pagination_when_from_is_unsupported(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="mailctl-project-") as directory:
+            project = Path(directory)
+            initialized = run_mailctl(project, "init", "--email", "owner@example.com")
+            self.assertEqual(initialized.returncode, 0, initialized.stderr)
+            module = load_mailctl_module()
+
+            class AlibabaLikeImap(SearchImapStub):
+                def uid(self, *query):
+                    if query[0] == "SEARCH":
+                        if "FROM" in query:
+                            raise module.imaplib.IMAP4.error(
+                                "BAD invalid command or parameters"
+                            )
+                        return "OK", [b"5 4 3 2 1"]
+
+                    uid = int(query[1])
+                    sender = (
+                        "alice@example.com"
+                        if uid in {4, 2, 1}
+                        else "someone-else@example.com"
+                    )
+                    header = (
+                        f"From: {sender}\r\n"
+                        "To: owner@example.com\r\n"
+                        f"Subject: Update {uid}\r\n"
+                        f"Message-ID: <message-{uid}@example.com>\r\n\r\n"
+                    ).encode()
+                    metadata = (
+                        f'{uid} (INTERNALDATE "27-Aug-2026 09:00:00 +0800" '
+                        'BODYSTRUCTURE ("TEXT" "PLAIN" NIL NIL NIL "7BIT" 4 1) '
+                        "BODY[HEADER] {160}"
+                    ).encode()
+                    return "OK", [
+                        (metadata, header),
+                        (b" BODY[TEXT]<0> {4}", b"body"),
+                    ]
+
+            common_args = [
+                "--from",
+                "alice@example.com",
+                "--since",
+                "2026-08-26T00:00:00+08:00",
+                "--limit",
+                "2",
+            ]
+            first_exit_code, first_page = run_search_with_imap(
+                project, module, AlibabaLikeImap, *common_args
+            )
+            second_exit_code, second_page = run_search_with_imap(
+                project,
+                module,
+                AlibabaLikeImap,
+                *common_args,
+                "--cursor",
+                first_page["next_cursor"],
+            )
+
+            self.assertEqual(first_exit_code, 0, first_page)
+            self.assertEqual([item["uid"] for item in first_page["items"]], [4, 2])
+            self.assertIsNotNone(first_page["next_cursor"])
+            self.assertEqual(second_exit_code, 0, second_page)
+            self.assertEqual([item["uid"] for item in second_page["items"]], [1])
+            self.assertIsNone(second_page["next_cursor"])
+
+    def test_search_reports_server_rejection_as_capability_error(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="mailctl-project-") as directory:
+            project = Path(directory)
+            initialized = run_mailctl(project, "init", "--email", "owner@example.com")
+            self.assertEqual(initialized.returncode, 0, initialized.stderr)
+            module = load_mailctl_module()
+
+            class RejectingImap(SearchImapStub):
+                def uid(self, *query):
+                    raise module.imaplib.IMAP4.error(
+                        "BAD invalid command or parameters"
+                    )
+
+            exit_code, result = run_search_with_imap(
+                project,
+                module,
+                RejectingImap,
+                "--since",
+                "2026-08-26T00:00:00+08:00",
+            )
+            self.assertEqual(exit_code, 2, result)
+            self.assertEqual(result["category"], "capability")
+            self.assertEqual(result["message"], "IMAP search rejected by server")
+
+    def test_search_retries_transient_imap_abort(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="mailctl-project-") as directory:
+            project = Path(directory)
+            initialized = run_mailctl(project, "init", "--email", "owner@example.com")
+            self.assertEqual(initialized.returncode, 0, initialized.stderr)
+            module = load_mailctl_module()
+            attempts = 0
+
+            class FlakyImap(SearchImapStub):
+                def uid(self, *query):
+                    nonlocal attempts
+                    attempts += 1
+                    if attempts < 3:
+                        raise module.imaplib.IMAP4.abort("socket error: EOF")
+                    return "OK", [b""]
+
+            exit_code, result = run_search_with_imap(
+                project,
+                module,
+                FlakyImap,
+                "--since",
+                "2026-08-26T00:00:00+08:00",
+            )
+
+            self.assertEqual(exit_code, 0, result)
+            self.assertEqual(result["items"], [])
+            self.assertEqual(attempts, 3)
+
+    def test_search_reports_server_denial_as_permission_error(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="mailctl-project-") as directory:
+            project = Path(directory)
+            initialized = run_mailctl(project, "init", "--email", "owner@example.com")
+            self.assertEqual(initialized.returncode, 0, initialized.stderr)
+            module = load_mailctl_module()
+
+            class DenyingImap(SearchImapStub):
+                def uid(self, *query):
+                    return "NO", [b"SEARCH not permitted"]
+
+            exit_code, result = run_search_with_imap(
+                project,
+                module,
+                DenyingImap,
+                "--since",
+                "2026-08-26T00:00:00+08:00",
+            )
+
+            self.assertEqual(exit_code, 2, result)
+            self.assertEqual(result["category"], "permission")
+            self.assertEqual(result["message"], "IMAP search denied by server")
 
     def test_search_retries_connection_failure_twice(self) -> None:
         with tempfile.TemporaryDirectory(prefix="mailctl-project-") as directory:
