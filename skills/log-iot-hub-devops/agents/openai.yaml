@@ -1,0 +1,6 @@
+interface:
+  display_name: "LogIotHubDevops"
+  short_description: "按可选追踪标识查询并格式化展示智享云研发测试环境日志"
+  default_prompt: "使用 $log-iot-hub-devops 查询最近三天的 ERROR 日志。"
+policy:
+  allow_implicit_invocation: false
