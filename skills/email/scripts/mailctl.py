@@ -321,15 +321,46 @@ class ImapMailbox:
         )
         if status != "OK":
             raise MailctlError("connection", f"IMAP fetch failed for UID {uid}")
-        chunks = [item[1] for item in data if isinstance(item, tuple) and len(item) == 2]
-        if not chunks:
+        header_bytes: bytes | None = None
+        text_bytes: bytes | None = None
+        descriptors: list[bytes] = []
+        for item in data:
+            if not isinstance(item, tuple) or len(item) != 2:
+                continue
+            descriptor, payload = item
+            if not isinstance(descriptor, bytes):
+                continue
+            descriptors.append(descriptor)
+            section = re.search(
+                rb"BODY\[(HEADER|TEXT)\](?:<\d+(?:\.\d+)?>)?\s+\{\d+\}\s*$",
+                descriptor,
+                re.IGNORECASE,
+            )
+            if not section or not isinstance(payload, bytes):
+                continue
+            if section.group(1).upper() == b"HEADER":
+                if header_bytes is not None:
+                    raise MailctlError(
+                        "connection",
+                        f"IMAP response repeated BODY[HEADER] for UID {uid}",
+                    )
+                header_bytes = payload
+            else:
+                if text_bytes is not None:
+                    raise MailctlError(
+                        "connection",
+                        f"IMAP response repeated BODY[TEXT] for UID {uid}",
+                    )
+                text_bytes = payload
+        if header_bytes is None:
             raise MailctlError("connection", f"IMAP returned no message for UID {uid}")
-        header_bytes = chunks[0]
-        text_bytes = chunks[1] if len(chunks) > 1 else b""
+        if text_bytes is None:
+            raise MailctlError(
+                "connection",
+                f"IMAP response missing BODY[TEXT] for UID {uid}",
+            )
         message = BytesParser(policy=policy.default).parsebytes(header_bytes)
-        metadata = b" ".join(
-            item[0] for item in data if isinstance(item, tuple) and len(item) == 2
-        ).decode("ascii", "replace")
+        metadata = b" ".join(descriptors).decode("ascii", "replace")
         internal_date = re.search(r'INTERNALDATE "([^"]+)"', metadata)
         try:
             received = (
