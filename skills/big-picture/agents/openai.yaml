@@ -1,5 +1,5 @@
 interface:
-  display_name: "先定大框架"
+  display_name: "big-picture"
   short_description: "先确认总体方向、主要边界与主流程，再整理共识交给后续细化"
   default_prompt: "使用 $big-picture，先一起确定这个问题的总体方案，确认大框架后再交接细化。"
 policy:

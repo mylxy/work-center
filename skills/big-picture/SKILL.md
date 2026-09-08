@@ -3,7 +3,7 @@ name: big-picture
 description: Use when the user explicitly invokes big-picture to settle an overall approach before details, for software architecture, product or business processes, or a general work plan.
 ---
 
-# 先定大框架
+# big-picture
 
 帮助用户先确定总体方向、主要边界和主流程，再把共识交给后续细化。默认在会话中展示总体图并逐项讨论；最终产物是交接包。
 
