@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codeup · Flow"
+  short_description: "通过阿里云官方 CLI 操作云效 Flow 流水线、运行实例及相关资源"
+  default_prompt: "$codeup flow 列出流水线分组，并按指定分组查询流水线。"
