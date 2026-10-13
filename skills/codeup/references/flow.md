@@ -1,35 +1,6 @@
 # Flow 操作指引
 
-## 配置与离线验证
-
-基线：aliyun 3.4.11，aliyun-cli-devops 0.9.1（d34ed63bbd），帮助中的 API 版本 2026-05-25。实际安装版本优先。
-
-新版云效使用 PAT，与 `aliyun configure` 的 AK/SK profile、YunXiaoProject MCP OAuth 不互通。按[官方 CLI 配置](https://help.aliyun.com/zh/yunxiao/developer-reference/how-to-install-initialize-and-use-the-apsara-devops-cli)在本机安全配置，让 Codex 执行命令的进程继承环境变量：
-
-| 配置 | 中心版 | Region 版 |
-| --- | --- | --- |
-| `ALIBABA_CLOUD_YUNXIAO_ACCESS_TOKEN` | 必需 | 必需 |
-| `ALIBABA_CLOUD_YUNXIAO_ORGANIZATION_ID` | 必需 | 不需要 |
-| `ALIBABA_CLOUD_YUNXIAO_API_BASE_URL` | 默认官方中心接入点，不需要自定义 | 必需，取组织实际接入地址 |
-
-两种目标配置同时存在时明确目标，避免调用错误组织/接入点。不要把 PAT 放入命令参数、仓库或 skill。只检查是否设置：
-
-```bash
-python3 - <<'PY'
-import os
-for name in ('ACCESS_TOKEN', 'ORGANIZATION_ID', 'API_BASE_URL'):
-    key = 'ALIBABA_CLOUD_YUNXIAO_' + name
-    print(key + ': ' + ('set' if os.environ.get(key) else 'missing'))
-PY
-```
-
-`version`、`--help` 和 `scripts/flow_catalog.py` 无需凭证，不访问云端资源。插件帮助正常不证明认证有效；配置完整后可用一页 `flow-list-pipeline-groups` 做只读验证。安装验收不创建、删除或运行流水线。`--cli-dry-run` 会打印请求细节；本地验证只使用虚构凭证和虚构数据，不输出真实 token、证书或变量。
-
-## 命令发现与参数依据
-
-运行 `aliyun devops --help`，用 `rg '^  flow-'` 筛出当前完整命令。按 [flow-commands.md](flow-commands.md) 找候选，再读 `aliyun devops <实际命令> --help`。未列出的能力先检查当前版本，不虚构操作或承诺 Region 支持中心版专用 API。
-
-CLI 帮助决定参数拼写/类型/必填项；涉及 JSON 内部结构、枚举、权限、分页及返回结构时，查[新版 OpenAPI](https://help.aliyun.com/zh/yunxiao/developer-reference/api-reference-standard-proprietary/)中的对应操作。选择 `/oapi/v1/flow`、`x-yunxiao-token` 的文档，避免混用旧的 `api-devops-2021-06-25-*` AK/SK 接口。帮助与文档不一致时说明差异并核实，不能猜字段。
+接入配置、权限诊断与命令发现见 [CLI 共用指引](cli.md)。流水线操作从当前 `flow-*` 帮助和 [Flow 命令索引](flow-commands.md) 按需检索；命令索引不是静态白名单。以下只保留流水线特有的对象关系与操作细节。
 
 ## 查询与分页
 

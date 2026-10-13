@@ -1,4 +1,4 @@
 interface:
-  display_name: "Codeup · Flow"
-  short_description: "通过阿里云官方 CLI 操作云效 Flow 流水线、运行实例及相关资源"
-  default_prompt: "$codeup flow 列出流水线分组，并按指定分组查询流水线。"
+  display_name: "Codeup · 云效"
+  short_description: "通过官方 CLI 管理云效项目协作、代码管理、流水线和制品仓库"
+  default_prompt: "$codeup 根据我的需求查询或管理云效项目协作、代码管理、流水线和制品仓库。"
