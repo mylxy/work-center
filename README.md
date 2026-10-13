@@ -2,6 +2,40 @@
 
 个人工作中心。目前包含显式调用的个人 skill `YunXiaoProject`，用于通过阿里云官方托管 MCP 读取单个 Work Item、流转 Status 或创建顶层评论。
 
+## 安装 Codeup 云效技能
+
+`codeup` skill 通过官方 `aliyun-cli-devops` 插件操作项目协作、代码管理、流水线和制品仓库。统一入口为 `$codeup <自然语言需求>`，按业务对象自动分流，无需 `flow` 子命令。四模块能力通过当前 CLI 帮助发现，直接调用 CLI，不维护 API 包装层。
+
+```bash
+aliyun plugin install --names aliyun-cli-devops
+aliyun devops version
+python3 skills/codeup/scripts/flow_catalog.py --check skills/codeup/references/flow-commands.md
+python3 -m unittest discover -s tests -p 'test_codeup_skill.py' -v
+python3 scripts/install_codeup_skill.py
+```
+
+安装器将技能复制到 `$HOME/.agents/skills/codeup`，相同内容重复安装无变化，遇到已有不同内容或符号链接会停止，保留用户文件。副本不依赖开发 worktree。升级时先审阅差异并备份已有安装，再移走旧目录重新运行安装器。
+
+```text
+$codeup 缺陷 ABVR-2021 是什么问题？
+$codeup 将 ABVR-2021 的状态改成已解决
+$codeup 查询某代码库的开放合并请求
+$codeup 查看某制品仓库的软件包版本
+$codeup 查询分组 111 下的所有流水线
+$codeup 查看流水线 123 最近一次运行的失败任务日志
+$codeup 按 ./pipeline.yaml 准备更新流水线 123，先展示变更
+```
+
+PAT 和组织配置只在本地环境中提供，详见 [CLI 接入指引](skills/codeup/references/cli.md)。缺凭证不影响本地帮助和命令草稿；不代表真实 API 已连通。默认验收仅检查版本、帮助、目录完整性和本地测试，不修改云端资源。
+
+插件升级后运行下列命令重新生成 [Flow 命令索引](skills/codeup/references/flow-commands.md)，审阅参数和能力变化，再更新安装副本：
+
+```bash
+python3 skills/codeup/scripts/flow_catalog.py --output skills/codeup/references/flow-commands.md
+```
+
+Codex 支持 `$skill-name` 显式调用和用户级技能目录；文件变化通常自动发现，若选择器未更新则重启 Codex。依据：[官方技能说明](https://developers.openai.com/codex/skills)。
+
 ## 安装 YunXiaoProject
 
 安装器会先校验完整 skill 包，再复制到 `$HOME/.agents/skills/yunxiao-project`。它只接受官方中心版 `project-management` endpoint；已有个人 skill 内容不同、已有 `yunxiao` MCP 指向其他来源、使用静态凭证或安全策略冲突时会停止，不覆盖原配置。

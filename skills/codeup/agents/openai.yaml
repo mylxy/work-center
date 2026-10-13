@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codeup · 云效"
+  short_description: "通过官方 CLI 管理云效项目协作、代码管理、流水线和制品仓库"
+  default_prompt: "$codeup 根据我的需求查询或管理云效项目协作、代码管理、流水线和制品仓库。"
